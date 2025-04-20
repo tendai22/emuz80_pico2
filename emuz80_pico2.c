@@ -5,6 +5,8 @@
 
 #include "blink.pio.h"
 
+#define CLK_PIN 41
+
 void blink_pin_forever(PIO pio, uint sm, uint offset, uint pin, uint freq) {
     blink_program_init(pio, sm, offset, pin);
     pio_sm_set_enabled(pio, sm, true);
@@ -49,14 +51,18 @@ int main()
 
     // PIO Blinking example
     PIO pio = pio0;
+    uint base = 0, clk_pin = 41;
+    if (clk_pin >= 32)
+        base = 16;
+    pio_set_gpio_base(pio, base);
     uint offset = pio_add_program(pio, &blink_program);
     printf("Loaded program at %d\n", offset);
         
-    #ifdef PICO_DEFAULT_LED_PIN
-    blink_pin_forever(pio, 0, offset, PICO_DEFAULT_LED_PIN, 3);
-    #else
-    blink_pin_forever(pio, 0, offset, 6, 3);
-    #endif
+    //#ifdef CLK_PIN
+    blink_pin_forever(pio, 0, offset, clk_pin, 2);
+    //#else
+    //blink_pin_forever(pio, 0, offset, 6, 3);
+    //#endif
     // For more pio examples see https://github.com/raspberrypi/pico-examples/tree/master/pio
     
     while (true) {
