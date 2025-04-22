@@ -27,19 +27,13 @@ lp2:
 // this is a raw helper function for use by the user which sets up the GPIO output, and configures the SM to output on a particular pin
 extern int my_pio_sm_set_consecutive_pindirs(PIO pio, uint sm, uint pin, uint count, bool is_out);
 
-static inline void my_pio_gpio_init(PIO pio, uint pin) {
-    check_pio_param(pio);
-    valid_params_if(HARDWARE_PIO, pin < NUM_BANK0_GPIOS);
-    printf("pio_gpio_init: %d, %d\n", pin, PIO_FUNCSEL_NUM(pio, pin));
-    gpio_set_function(pin, PIO_FUNCSEL_NUM(pio, pin));
-}
-
 void blink_program_init(PIO pio, uint sm, uint offset, uint pin) {
-   my_pio_gpio_init(pio, pin);
-   my_pio_sm_set_consecutive_pindirs(pio, sm, pin, 1, true);
+   pio_gpio_init(pio, pin);
+   pio_sm_set_consecutive_pindirs(pio, sm, pin, 1, true);
    pio_sm_config c = blink_program_get_default_config(offset);
+   // set_set_pin_base should have been adjusted by pio->gpiobase
+   // so far not so in set_set_pin_base();
    sm_config_set_set_pins(&c, pin - pio_get_gpio_base(pio), 1);
-    printf("pinctrl(%p): %08x\n", &(pio->sm[sm].pinctrl), pio->sm[sm].pinctrl);
    pio_sm_init(pio, sm, offset, &c);
 }
 %}
