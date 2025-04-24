@@ -344,7 +344,7 @@ static inline void pio_gpio_init(PIO pio, uint pin) {
 |---|---|
 |1. TESTピン|+ ソフト側で TEST ピントグル<br>+ GPIO45に割り当てた<br>+ 複数回数が波形に出てこない。
 |2. ステートマシン2つを動かす。|+ blink 2個でいいだろう。<br>+ 1個めはクロックにする。<br>+ 2個めは将来の wait マシンにする。
-|3. データバスの扱いを決める|+ PIOで IN/OUT を制御するのは PIODIRS レジスタか?<br>ひょっとして、これ、PIO全体で1個しか使わない?<br>+ とすると、データバスの IN/OUT を制御するためには、D0-7 を GPIO16より上に割り当てる必要がある。<br>+ この方向でピンアサインを変えておくか。<br>アドレスバスは GPIO0-15 に割り当てる。
+|3. データバスの扱いを決める|+ PIOで IN/OUT を制御するのは PINDIRS レジスタか?<br>ひょっとして、これ、PIO全体で1個しか使わない?<br>+ とすると、データバスの IN/OUT を制御するためには、D0-7 を GPIO16より上に割り当てる必要がある。<br>+ この方向でピンアサインを変えておくか。<br>アドレスバスは GPIO0-15 に割り当てる。
 |4. 2個めのステートマシンを<br> MREQ で起動する(wait mreq)|+ CLK を MREQ につなぎ、立下りエッジで動き出すことを確認する。
 |5. Z80 を NOP フリーラン|+ RESET をトグル、BUSRQ, INT, NMI は High プルアップ。<br>+ CLK は1個目のステートマシンで発生させる。<br>+ D0-D7 は 10kでプルダウン(のちに 3.3V プルアップするので、抵抗まとめ先は切り替え考慮)。<br>+ WAIT はプルアップ
 |6. ソフト起動を確かめる。|+ RX FIFO に書き込み
@@ -355,3 +355,91 @@ static inline void pio_gpio_init(PIO pio, uint pin) {
 EMUZ80 の 2 チップのエレガントさが失われるがやむを得ない。動き出すと LED を点灯させたくなるので、そのドライバも兼ねようと思う。
 
 将来的には1チップゲート74AHC1G00W5, TC7S14F,LFとかで基板を起こすとすっきり行きそうだ。「1チップゲートはおやつに入りますか？」という質問はしない方向で進めたい。
+
+## データバスの入出力
+
+PIO を使う方向で考えている。
+
+* GPIO16-23 に割り当てる。
+* PINCTRL_OUT_BASE を16, PINCTRL_OUT_COUNT を 8 とすることで、out 命令で D0-D7 に書き出せる
+* IN 命令のマッピング、PINCTRL_IN_BASE を 16 とすることで IN 命令で取り出せる。IN 命令のカウントを 8で指定することで1バイトのみ取り出しとできる。
+* WAIT GPIO は PINCTRL_IN_BASE と別に絶対ピン番号で指定できるらしい。MREQ を待つこととする。
+
+ステートマシンの PINCTRL レジスタ
+
+|ビット|数|名前|説明|
+|-----|---|----|----|
+|31:29|3|SIDESET_COUNT|0-5の範囲で指定<br>0:すべて遅延扱い<br>5:すべてsideset扱い。<br>5ビット中上側がsidesetデータ、下側が遅延オペランド。|
+|28:26|3|SET_COUNT|SET命令でアサートされるピンの数。0-5の範囲で指定。
+|25:20|5|OUT_COUNT|OUT PINS, OUT PINDIRS, MOV PINS命令でアサートされるピンの数。0-32の範囲で指定する。
+|19:15|5|IN_BASE|IN data bus命令のLSBにマッピングされるピン。
+|14:10|5|SIDESET_BASE|sideset操作の影響を受けるLSBピン。
+|9:5|5|SET_BASE|SET PINS, SET PINDIRS命令で影響を受けるLSBピン。
+|4:0|5|OUT_BASE|OUT PINS, OUT PINDIRS命令で影響を受けるLSBピン。
+
+CPUがデータバスアクセスの際に、読み込み用RX FIFOへの書き込みと、書き出し用TX FIFOからの読み出し、データバス展開(PINDIRSも変える)を行うPIOプログラムをステートマシン2に置いて使う感じかな。
+
+あと、PINDIRSをall 0(IN)にするPIOプログラムもおいて、WAITマシンから叩く。
+
+GPIOBASEレジスタはステートマシンごとではない、PIO ごとなので、やはり、GPIOBASE = 16 としている以上、D0-D7 はGPIO16以上に割り当てるしかない。
+
+JMP PIN 命令のチェック先は EXECCTRL_JMP_PIN で指定できる。ステートマシンごとに1個、入力マッピングと別に使える。WAIT MREQ 後のチェックは、RD, RFSH と2本チェックが必要なので難しいが、どこかのピンは使えるかもしれない。
+
+PULL 命令は (命令中のblkビットを立てておくと)、TX FIFOが空の場合はストールする。プログラムからのデータ待ちに使用できる。
+
+Z80 からのライトサイクルで、データバスのデータを読み込むのにステートマシンが使える。WR 信号を使うとすると、それを WAIT して IN して PUSH する感じ。
+
+使えなくても、WAITマシンが WR サイクル判定して delay 後に IN して PUSH したらいいか。
+
+CPU側はWAITマシンの RX FIFO をブロック監視している。そこにステータスとデータこみで乗せる。
+
+CPU側は単一イベント待ちにすべてのイベントを乗せたい。
+
+* RDサイクルなら、RDステータスのみ、
+* WRサイクルなら、WRステータスとデータ8ビット、
+* INTAサイクルなら、INTAステータスのみ、
+* シリアルポート受信もイベントとして乗せる。SERIAL_INステータスとデータ8ビット、
+
+PIOで内蔵デバイスのステータスを見られないか。
+
+ステートマシン間の同期には IRQ 命令を使える。IRQ0-3 ビットをセットした状態で待機に入り、クリアされると IRQ 命令から返る。
+
+### 読み込み項目
+
+1. まずはここから
+  * WAIT 命令でMREQピン指定する
+  * OUT命令でWAITピンを0にする
+2. IRQ立ててソフト実行を再開
+  * IRQ立てて、
+  * TX FIFOデータ待ちに入る。
+
+3. TX FIFOデータ待ち
+  * OUT PINDIR ではOSRから8ビットシフトアウトする。ソフト側でTX FIFOに0xff or 0x0 を書き込んでデータバスの方向をソフトに指定させることにする。というか、この場所では常にPINDIRはin方向だ。
+
+## データシート徒然
+
+WRAP_TOP, WRAP_BOTTOM: あるステートマシンごとに機械語の最初と最後を示す。最後の JMP 命令が不要となる。ラベル .wrap_target, .wrap の値で取り出せるが、絶対アドレスなので、途中にプログラムをロードする際には、先頭アドレスからの調整が必要。
+
+```
+mm_pio->sm[0].execctrl =
+    (auto_push_pull_wrap_target << PIO_SM0_EXECCTRL_WRAP_BOTTOM_LSB) |
+    (auto_push_pull_wrap << PIO_SM0_EXECCTRL_WRAP_TOP_LSB);
+```
+
+> これはオフセット調整しているようには見えないが。
+
+ステートマシンの EXECCTRLレジスタのビットマップ:
+
+|ビット|数||シンボル|説明|
+|---|---|---|---|---|
+|31|1|EXEC_STALLED|RO|INSTRに書き込まれた命令はストールされ、ステートマシンにラッチされる。この命令が完了すると0にクリアされる。
+|30|1|SIDE_EN|RW|Delay/SidesetフィールドのMSBをsideset enable として扱う。
+|29|1|SIDE_PINDIR|RW|1のとき、サイドセットはPINDIRにアサートされる。
+|28:24|5|JMP_PIN|RW|JMP PINとして使うGPIO番号。
+|23:19|5|OUT_EN_SEL|RW|inline OUT enable に使用するデータビット(?!)
+|18|1|INLINE_OUT_EN|RW|1のとき、OUT dataの1ビットを補助書き込みイネーブルとして使用する。<br>0のとき、OUT_STICKYと組み合わせて使用すると、最新のpin書き込みを出アサートする。<br>(ステートマシン間の書き込み優先順位と組み合わせて使うらしい)
+|17|1|OUT_STICKY:1のとき、最新のOUT/SETをpinsにアサートし続ける。
+|16:12|5|WRAP_TOP|機械語がこのアドレスに達すると、WRAP_BOTTOMに巻き戻る
+|11:7|5|WRAP_BOTTOM|WRAP_TOPから巻き戻る先、おそらくループ先端。
+|6:5|2|STATUS_SEL|
+
