@@ -334,3 +334,47 @@ static inline void pio_gpio_init(PIO pio, uint pin) {
 EMUZ80 の 2 チップのエレガントさが失われるがやむを得ない。動き出すと LED を点灯させたくなるので、そのドライバも兼ねようと思う。
 
 将来的には1チップゲート74AHC1G00W5, TC7S14F,LFとかで基板を起こすとすっきり行きそうだ。「1チップゲートはおやつに入りますか？」という質問はしない方向で進めたい。
+
+## PIO 2つ
+
+問題なく動いた。ステートマシン番号を 0, 1 としていなかったので、2度目の初期化で 1番目のステートマシンがリセットされていた。
+
+```
+    uint offset1 = pio_add_program(pio, &clockgen_program);
+    clockgen_pin_forever(pio, 0, offset1, clk_pin, 10);
+    uint offset2 = pio_add_program(pio, &wait_control_program);
+    wait_control_pin_forever(pio, 1, offset2, wait_pin, 200000);
+```
+
+## gpio
+
+結局、
+
+```
+    gpio_set_dir(TEST_PIN, true);
+    gpio_put(TEST_PIN, 0);
+```
+
+```
+#define TOGGLE() do {    gpio_xor_mask64(((uint64_t)1)<<TEST_PIN); } while(0)
+```
+
+で佳かった。
+
+ロジアナ(DSView v1.3.2)で、スレシホールド 0.8V だと TEST pin にノイズが乗るが、0.9Vなら大丈夫だった。
+
+## 時間が一定しない。
+
+```
+    while (n-- > 0) TOGGLE();
+    TOGGLE();
+    TOGGLE();
+    n = 100;
+    while (n-- > 0) TOGGLE();
+    TOGGLE();
+    TOGGLE();
+
+```
+
+うーん、RAM 実行かなぁ。XIPで変動していることを疑っている。
+
