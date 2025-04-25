@@ -82,21 +82,17 @@ int main()
     // pio_set_gpio_base should be invoked before pio_add_program
     uint offset1 = pio_add_program(pio, &clockgen_program);
     //printf("Loaded program at %d\n", offset1);
-    clockgen_pin_forever(pio, 0, offset1, clk_pin, 10);
+    clockgen_pin_forever(pio, 0, offset1, clk_pin, 10000);
     uint offset2 = pio_add_program(pio, &wait_control_program);
     //printf("Loaded program at %d\n", offset2);
     wait_control_pin_forever(pio, 1, offset2, wait_pin, 200000);
     // For more pio examples see https://github.com/raspberrypi/pico-examples/tree/master/pio
-    pio_sm_set_enabled(pio, 0, true);
-    pio_sm_set_enabled(pio, 1, true);
     gpio_set_function(TEST_PIN, GPIO_FUNC_SIO);
     while (n-- > 0) TOGGLE();
     TOGGLE();
     TOGGLE();
-    n = 100;
-    while (n-- > 0) TOGGLE();
-    TOGGLE();
-    TOGGLE();
+    pio_sm_set_enabled(pio, 0, true);
+    pio_sm_set_enabled(pio, 1, true);
 
     while (true) {
         //printf("H");

@@ -485,3 +485,19 @@ mm_pio->sm[0].execctrl =
 ```
 
 うーん、RAM 実行かなぁ。XIPで変動していることを疑っている。
+
+## 4/25 wait gpio 25
+
+クロック(clk_pin 41)をMREQ(pin 25)につないで、pin25 の 0, 1 を wait 命令でとらえてみる。
+
+```
+.wrap_target
+    wait 0 gpio 25 [5]  ; pin 25
+    set pins, 0     ; WAIT Low
+    wait 1 gpio 25 [5]  ; pin 25
+    set pins, 1    ; WAIT High
+.wrap
+```
+
+これで CLK に 60ns 遅延する波形を WAIT(pin 31)に出力させることができた。
+
