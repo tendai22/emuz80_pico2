@@ -11,11 +11,11 @@
     out y, 32
 .wrap_target
     mov x, y
-    set pins, 1   ; Turn LED on
+    set pins, 0   ; Turn LED on
 lp1:
     jmp x-- lp1   ; Delay for (x + 1) cycles, x is a 32 bit number
     mov x, y
-    set pins, 0   ; Turn LED off
+    set pins, 1   ; Turn LED off
 lp2:
     jmp x-- lp2   ; Delay for the same number of cycles again
 .wrap             ; Blink forever!
@@ -23,9 +23,9 @@ lp2:
 .program wait_control
     set pins, 1 [20]
 .wrap_target
-    wait 0 gpio 25 [5]  ; pin 25
-    set pins, 0     ; WAIT Low
-    wait 1 gpio 25 [5]  ; pin 25
+    wait 0 gpio 25  ; pin 25
+    set pins, 0    ; WAIT Low
+    wait 1 gpio 25  ; pin 25
     set pins, 1    ; WAIT High
 .wrap
 
@@ -41,7 +41,7 @@ void clockgen_program_init(PIO pio, uint sm, uint offset, uint pin) {
    pio_sm_config c = clockgen_program_get_default_config(offset);
    // set_set_pin_base should have been adjusted by pio->gpiobase
    // so far not so in set_set_pin_base();
-   sm_config_set_set_pins(&c, pin - pio_get_gpio_base(pio), 1);
+   sm_config_set_set_pins(&c, pin, 1);
    pio_sm_init(pio, sm, offset, &c);
 }
 
@@ -51,7 +51,7 @@ void wait_control_program_init(PIO pio, uint sm, uint offset, uint pin) {
    pio_sm_config c = wait_control_program_get_default_config(offset);
    // set_set_pin_base should have been adjusted by pio->gpiobase
    // so far not so in set_set_pin_base();
-   sm_config_set_set_pins(&c, pin - pio_get_gpio_base(pio), 1);
+   sm_config_set_set_pins(&c, pin, 1);
    pio_sm_init(pio, sm, offset, &c);
 }
 

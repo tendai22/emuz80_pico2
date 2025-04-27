@@ -501,3 +501,37 @@ mm_pio->sm[0].execctrl =
 
 これで CLK に 60ns 遅延する波形を WAIT(pin 31)に出力させることができた。
 
+## 4/27 wait gpio 25
+
+1. CMakeFile.txt の board 指定を pico2 から pimoroni_pga2350 にすると進んだ。
+
+当初 pico2, これは PICO_PIO_USE_GPIA_BASE がゼロのまま。ライブラリの選択が 64ピン版だったらしく、
+だめだった。
+
+2. MREQ_Pin を `gpio_init(MREQ_Pin);` することが必要だった。これなしでは 無割り当て状態で、pin25が内部につながっていかなかった。
+
+3. これで、wait 0 gpio 25 が動く。それどころか、wait 0 gpio 40 も動く。ボード指定を正しくすることが大事。
+
+これで、CLK -> MREQ とつないでおいて、CLK に WAIT が追従するようになった。
+
+* CLK のエッジに 40ns 遅れて wait が動く。以下のプログラムで。
+
+```
+.wrap_target
+    wait 0 gpio 25  ; pin 25
+    set pins, 0    ; WAIT Low
+    wait 1 gpio 25  ; pin 25
+    set pins, 1    ; WAIT High
+.wrap
+```
+
+## TEST pin のノイズ
+
+ノイズ(グリッジ)が乗っている。
+
+* CLK, MREQ, WAIT が動くタイミングでひげがでる。
+* ひげはLに貼り付けているときにでる。High に貼り付けているときはでない。
+* VBUS - GND 間に 10uF 電解コンデンサを挟んだが改善しない。
+* TEST Pin が 45 でも 10 でも同じように出る。
+* ロジアナのスレシホールド 0.8V で出る。 1.3V で出なくなる。
+
