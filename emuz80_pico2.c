@@ -93,7 +93,7 @@ int main()
     gpio_out_init(BUSRQ_Pin, true);
     gpio_out_init(INT_Pin, false);      // INT Pin has an inverter, so negate signal is needed
 
-    gpio_out_init(TEST_Pin, false);
+    gpio_out_init(TEST_Pin, true);
     TOGGLE();
     TOGGLE();
     //TOGGLE();
@@ -114,7 +114,7 @@ int main()
     // pio_set_gpio_base should be invoked before pio_add_program
     uint offset1 = pio_add_program(pio, &clockgen_program);
     //printf("Loaded program at %d\n", offset1);
-    clockgen_pin_forever(pio, 0, offset1, CLK_Pin, 100000);
+    clockgen_pin_forever(pio, 0, offset1, CLK_Pin, 1000);
     uint offset2 = pio_add_program(pio, &wait_control_program);
     //printf("Loaded program at %d\n", offset2);
     wait_control_pin_forever(pio, 1, offset2, WAIT_Pin, 200000);
@@ -122,8 +122,16 @@ int main()
     //while (n-- > 0) TOGGLE();
     TOGGLE();
     TOGGLE();
+    // RESET assert
+    gpio_put(RESET_Pin, false); 
+    // start clock
     pio_sm_set_enabled(pio, 0, true);
     pio_sm_set_enabled(pio, 1, true);
+
+    TOGGLE();
+    TOGGLE();
+    gpio_put(RESET_Pin, true);
+    TOGGLE();
 
     while (true) {
         //printf("H");
