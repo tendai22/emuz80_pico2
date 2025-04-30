@@ -114,7 +114,7 @@ int main()
     // pio_set_gpio_base should be invoked before pio_add_program
     uint offset1 = pio_add_program(pio, &clockgen_program);
     //printf("Loaded program at %d\n", offset1);
-    clockgen_pin_forever(pio, 0, offset1, CLK_Pin, 1000);
+    clockgen_pin_forever(pio, 0, offset1, CLK_Pin, 2000);
     uint offset2 = pio_add_program(pio, &wait_control_program);
     //printf("Loaded program at %d\n", offset2);
     wait_control_pin_forever(pio, 1, offset2, WAIT_Pin, 200000);
@@ -131,11 +131,13 @@ int main()
     TOGGLE();
     TOGGLE();
     gpio_put(RESET_Pin, true);
-    TOGGLE();
 
+    uint32_t dummy;
     while (true) {
-        //printf("H");
-        //TOGGLE();
-        sleep_ms(1);
+        dummy = pio_sm_get_blocking(pio, 1);
+        TOGGLE();
+        sleep_us(1);
+        pio_sm_put(pio, 1, dummy);
+        TOGGLE();
     }
 }

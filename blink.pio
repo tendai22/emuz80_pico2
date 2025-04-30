@@ -22,12 +22,18 @@ lp2:
 
 .program wait_control
     set pins, 1 [20]
+    pull noblock    ; dummy pull for flush
 .wrap_target
     wait 0 gpio 25  ; pin 25
-    set pins, 0    ; WAIT Low
-    wait 1 gpio 25  ; pin 25
-    set pins, 1    ; WAIT High
+    set pins, 0     ; WAIT Low
+    push            ; notify an access occurs
+    pull block      ; wait for cpu's process finished
+    set pins, 1     ; WAIT High
+    wait 1 gpio 25  ; sleep until this cycle ends
 .wrap
+
+.program databus_control
+    pull 
 
 % c-sdk {
 #include <stdio.h>

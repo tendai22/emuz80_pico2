@@ -535,3 +535,56 @@ mm_pio->sm[0].execctrl =
 * TEST Pin が 45 でも 10 でも同じように出る。
 * ロジアナのスレシホールド 0.8V で出る。 1.3V で出なくなる。
 
+## wait control
+
+* MREQ Pin Low を待って起動
+* WAIT Low
+* ソフト側にイベント送付(push -> pio_sm_get_blocking(pio, 1))
+* ソフト側は pio_sm_get_blocking から戻ってくる。
+* アドレスバスを読み込み、READならデータバスにデータを載せる
+  WRITEならデータバスからデータを読み込む(ここ未実装)
+* 処理が終わると、pim_sm_put でメモリアクセス完了を通知する。
+* PIO側では pull で終了イベント発生を知る。
+* WAIT High にする。
+* MREQ Pin High を待つ。本サイクル終了を待つ。
+
+何もしないと、TX FIFO に１ワード何かが入っており、PIO側がうまくブロックしなかった。最初の pull noblock で読み出してフラッシュすることで、PIO側がうまくブロックするようになった。将来的にはC言語側で明示的にクリアするべき。
+
+```
+.program wait_control
+    set pins, 1 [20]
+    pull noblock    ; dummy pull for flush
+.wrap_target
+    wait 0 gpio 25  ; pin 25
+    set pins, 0     ; WAIT Low
+    push            ; notify an access occurs
+    pull block      ; wait for cpu's process finished
+    set pins, 1     ; WAIT High
+    wait 1 gpio 25  ; sleep until this cycle ends
+.wrap
+```
+
+```
+    uint32_t dummy;
+    while (true) {
+        dummy = pio_sm_get_blocking(pio, 1);
+        TOGGLE();
+        sleep_us(1);
+        pio_sm_put(pio, 1, dummy);
+        TOGGLE();
+    }
+```
+
+アドレスバスの読み込み、データバスの処理はまだ実装できていない。
+
+## データバス処理
+
+もう1つステートマシンを用意する。ステートマシン0, 1 はすでに OUT ピンを割り当てているため、D0-D7(GPIO16-GPIO23)をIN/OUTするには、別のステートマシンを用意してそこに割り当てる必要がある。
+
+このステートマシンも MREQ ピンを待つ。
+
+READ/WRITEを区別するには、RDピンを読んで分岐する。WRITEならデータバスを読み込み、RX FIFOにおく。ソフト側では pio_sm_get_blocking で２ワードを、１ワード目は all zero, 2ワードめで8bitデータを受け取る。READなら all one を返し、TX FIFO から8bitデータを取り出しデータバスに書き出す。PIODIRSにOUTをつけ、MREQ 1 を待つ。
+
+MREQ 1 となると、PIODIRSをINにして、ループの最初に戻る。
+
+sidesetをうまく使うとWAIT制御もできるかもしれない。
