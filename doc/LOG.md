@@ -588,3 +588,45 @@ READ/WRITEを区別するには、RDピンを読んで分岐する。WRITEなら
 MREQ 1 となると、PIODIRSをINにして、ループの最初に戻る。
 
 sidesetをうまく使うとWAIT制御もできるかもしれない。
+
+## ピン監視・操作命令の対象ピンの決まり方
+
+> これらの各操作は GPIO の 4 つの連続した範囲の 1 つを使用し、各範囲のベースとカウントは各ステートマシンの PINCTRL レジスタで設定します。 OUT、SET、IN、およびサイドセット操作のそれぞれに範囲があります。 各範囲は、指定された PIO ブロック(RP2350 では 30 個のユーザ GPIO)にアクセス可能な GPIO のいずれかをカバーすることができ、範囲は重複することができます。
+
+Index オペランドは5ビットあるので、連続4つまで・5ビット中2ビットしか使えないという制約は、GPIOマッパのハードウェア的都合かな。
+
+WAIT, JMPのIndexは5ビット丸ごと有効です。PINCTRL_IN_BASE に0 or 16 を代入し、そこから連続32ピンしか使えない。
+
+ちなみに、PINCTRL_IN_BASE に 16 を代入して、GPIO10に set pins 命令でクロック出力できたのはなんなんだろうか。謎。
+
+* クロック生成でステートマシン1つ使う。set/sideset で最大連続2ビットを使う。現在は40, 41ピン。
+* WAIT生成、バスRead/Write/OE制御で2つめのステートマシンを使う。使えると思う。
+  + MREQ で wait する。もしくは MREQ/IORQ でビジーループ待ち。jmp pin で振り分ける。
+  + RD,RFSHで jmp pin を使う。正規のメモリアクセス抽出と、Read/Write で処理を分ける。
+  + IN/OUT は D0-D7 に割り当てる。8本の IN/OUT 命令と、OUT PINDIR でOE制御する。
+  + メインCPUプログラムとのやりとりは、RX FIFO, TX FIFO を使う。Z80 WriteデータをRX FIFOで渡し、Z80 ReadデータをTX FIFOで受け付ける。
+  + イベント発生もRX FIFOで渡す。RX FIFOの1つ目はRead/Write/MEM/IO/INTAフラグを渡す。Z80 Writeサイクルでは2つ目のデータを読み取る。Z80 ReadサイクルではRX FIFOを待ちに行かずにTX FIFOにデータを書き出し、ステートマシンがデータバスへの書き出しと、PINDIRの書き出しを行う。
+  + 全て終わるとwait 1 MREQ し、MREQ が１に戻ったらPINDIRをall zeroにする。
+* シリアルポートもステートマシン2つで実現すると、データ受信時のステータス改変ができるが、それは第２段階とする。最初は、メインCPU側でポーリングする。
+
+ということで、PIO 各ベースの割り当て案。PINCTRLレジスタはステートマシンごとに存在する。
+
+|type|SM|BASE|COUNT|description|
+|---|---|---|
+|SET|0|40|1 or 2|クロック発生をsidesetで行うように変更する。
+|IN|0|25|1|クロックストレッチを行う場合、このピンを監視して0の間は止める。
+|IN|1|0|8|データRead/Write/OE
+|OUT|1|0|8|データRead/Write/OE
+|SET|25|1|WAIT信号1ピンのみ(CPUによっては25,26,...と複数割り当ても想定している)
+|PINCTRL_MOV_BASE|NA|とりあえずunused
+
+## waitマシンの再構成
+
+* MREQを待つ。
+* RDで振り分ける。
+* Read(Z80 Write)時には、RX FIFOにall zeroを書き込み、INしてpush
+* Write(Z80 Read)時には、RX FIFOにall oneを書き込み、pullしてOUTする。OUT PINDIR alloneする。
+* Read/Writeとも終わると、wait 1, MREQする。
+* MREQが立ったら、OUT PINDIR allzero して先頭に戻る。
+
+* RX FIFOにall zeroを書き込むには、
