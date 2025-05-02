@@ -61,6 +61,8 @@ void gpio_out_init(uint gpio, bool value) {
     gpio_set_function(gpio, GPIO_FUNC_SIO);
 }
 
+uint8_t mem[65536];
+
 int main()
 {
     stdio_init_all();
@@ -105,7 +107,9 @@ int main()
     gpio_init(MREQ_Pin);
 
     // PIO Blinking example
-    PIO pio_clock = pio0, pio_wait = pio1;
+    //PIO pio_clock = pio0, pio_wait = pio1;
+    PIO pio_clock = pio0;
+    PIO pio_wait = pio0;
     uint sm_clock = 0, sm_wait = 1;
         
     //uint clk_pin = 41;
@@ -122,6 +126,10 @@ int main()
     while (n-- > 0) TOGGLE();
     TOGGLE();
     TOGGLE();
+    // mem clear
+    for (int i = 0 ; i < sizeof mem; ++i)
+        mem[i] = 0;
+
     // RESET assert
     gpio_put(RESET_Pin, false); 
     // start clock
@@ -133,12 +141,14 @@ int main()
 
     gpio_put(RESET_Pin, true);
 
-    uint32_t dummy;
+    uint32_t dummy, count, addr, data;
+    count = 0;
     while (true) {
         dummy = pio_sm_get_blocking(pio_wait, 1);
         TOGGLE();
-        //sleep_us(1);
-        pio_sm_put(pio_wait, 1, dummy);
+        addr = (gpio_get_all() & 0xffff);
+        data = mem[addr];
+        pio_sm_put(pio_wait, 1, count++);
         TOGGLE();
     }
 }

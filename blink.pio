@@ -21,19 +21,24 @@ lp2:
 .wrap             ; Blink forever!
 
 .program wait_control
-    set pins, 0
+    set pins, 1     ; WAIT High
     pull noblock    ; dummy pull for flush
+    wait 1 gpio 42  ; wait for RESET negate
+    wait 1 gpio 25  ; assure MREQ High
 .wrap_target
-    wait 0 gpio 25  ; pin 25
+    wait 0 gpio 25  ; detect MREQ down edge
     set pins, 0     ; WAIT Low
+    ; so far always READ
+    mov x, ~NULL    ; set X to all one
+    mov isr, X
+    mov pindirs, x  ; pindir is (all one)out
     push            ; notify an access occurs
     pull block      ; wait for cpu's process finished
+    out pins, 8
     set pins, 1     ; WAIT High
     wait 1 gpio 25  ; sleep until this cycle ends
+    mov pindirs, NULL   ; D0-D7 reset to 3-state (input)
 .wrap
-
-.program databus_control
-    pull 
 
 % c-sdk {
 #include <stdio.h>
@@ -50,6 +55,7 @@ void clockgen_program_init(PIO pio, uint sm, uint offset, uint pin) {
 }
 
 void wait_control_program_init(PIO pio, uint sm, uint offset, uint pin) {
+   // pin ... WAIT_Pin
    pio_gpio_init(pio, pin);
    pio_sm_set_consecutive_pindirs(pio, sm, pin, 1, true);
    pio_sm_config c = wait_control_program_get_default_config(offset);

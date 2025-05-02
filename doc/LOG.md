@@ -630,3 +630,52 @@ WAIT, JMPのIndexは5ビット丸ごと有効です。PINCTRL_IN_BASE に0 or 16
 * MREQが立ったら、OUT PINDIR allzero して先頭に戻る。
 
 * RX FIFOにall zeroを書き込むには、
+  + MOV ISR, NULL (or ~NULL)
+  + PUSH
+
+## pio 2個に分けなくても大丈夫
+
+クロック生成とwait機械を同じPIOでできるか？
+
+sm_config_set_in_pinsなどが smを引数に持たないので4sm共通ではないかと心配だったが、そうではなかった。
+
+プログラムごとにset_set_pinsしているが、(41と31で)それなりに動いているようだ。少し謎。
+
+## PIO設定後、runするまでの間のWAITを期待通りに設定できない
+
+Low になってしまう。命令実行すると最初の命令でHighにしてあるが、事前にgpio_putでHighにしていてもLowになってしまう。
+
+`pio_sm_set_pins64(pio, sm, pin);` を入れてみたが効果なし。
+
+RESET Highまで waitマシンを止めておくことで無事 High に貼り付けることができた。
+
+機械語先頭の `set pins 1` を抜くとゼロになった、失敗。
+
+## メモリリードを組んでみた
+
+動作しているかどうかは不明だが、まずコードを書いてみた。
+
+```
+.program wait_control
+    set pins, 1     ; WAIT High
+    pull noblock    ; dummy pull for flush
+    wait 1 gpio 42  ; wait for RESET negate
+    wait 1 gpio 25  ; assure MREQ High
+.wrap_target
+    wait 0 gpio 25  ; detect MREQ down edge
+    set pins, 0     ; WAIT Low
+    ; so far always READ
+    mov x, ~NULL    ; set X to all one
+    mov isr, X
+    mov pindirs, x  ; pindir is (all one)out
+    push            ; notify an access occurs
+    pull block      ; wait for cpu's process finished
+    out pins, 8
+    set pins, 1     ; WAIT High
+    wait 1 gpio 25  ; sleep until this cycle ends
+    mov pindirs, NULL   ; D0-D7 reset to 3-state (input)
+.wrap
+```
+
+これからデバッグ開始です。
+
