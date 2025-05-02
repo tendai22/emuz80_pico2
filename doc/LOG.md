@@ -615,9 +615,9 @@ WAIT, JMPのIndexは5ビット丸ごと有効です。PINCTRL_IN_BASE に0 or 16
 |---|---|---|
 |SET|0|40|1 or 2|クロック発生をsidesetで行うように変更する。
 |IN|0|25|1|クロックストレッチを行う場合、このピンを監視して0の間は止める。
-|IN|1|0|8|データRead/Write/OE
-|OUT|1|0|8|データRead/Write/OE
-|SET|25|1|WAIT信号1ピンのみ(CPUによっては25,26,...と複数割り当ても想定している)
+|IN|1|16|8|データRead/Write/OE
+|OUT|1|16|8|データRead/Write/OE
+|SET|1|31|WAIT信号1ピンのみ(CPUによっては25,26,...と複数割り当ても想定している)
 |PINCTRL_MOV_BASE|NA|とりあえずunused
 
 ## waitマシンの再構成

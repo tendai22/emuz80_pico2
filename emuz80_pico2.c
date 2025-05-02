@@ -105,39 +105,40 @@ int main()
     gpio_init(MREQ_Pin);
 
     // PIO Blinking example
-    PIO pio = pio0;
-    int n = 100;
+    PIO pio_clock = pio0, pio_wait = pio1;
+    uint sm_clock = 0, sm_wait = 1;
         
     //uint clk_pin = 41;
     //uint wait_pin = 31;
-    pio_set_gpio_base(pio, 16);
+    pio_set_gpio_base(pio_clock, 16);
+    pio_set_gpio_base(pio_wait, 16);
     // pio_set_gpio_base should be invoked before pio_add_program
-    uint offset1 = pio_add_program(pio, &clockgen_program);
-    //printf("Loaded program at %d\n", offset1);
-    clockgen_pin_forever(pio, 0, offset1, CLK_Pin, 2000);
-    uint offset2 = pio_add_program(pio, &wait_control_program);
-    //printf("Loaded program at %d\n", offset2);
-    wait_control_pin_forever(pio, 1, offset2, WAIT_Pin, 200000);
+    uint offset1 = pio_add_program(pio_clock, &clockgen_program);
+    clockgen_pin_forever(pio_clock, sm_clock, offset1, CLK_Pin, 50);
+    uint offset2 = pio_add_program(pio_wait, &wait_control_program);
+    wait_control_pin_forever(pio_wait, sm_wait, offset2, WAIT_Pin, 200000);
     // For more pio examples see https://github.com/raspberrypi/pico-examples/tree/master/pio
-    //while (n-- > 0) TOGGLE();
+    int n = 10;
+    while (n-- > 0) TOGGLE();
     TOGGLE();
     TOGGLE();
     // RESET assert
     gpio_put(RESET_Pin, false); 
     // start clock
-    pio_sm_set_enabled(pio, 0, true);
-    pio_sm_set_enabled(pio, 1, true);
+    pio_sm_set_enabled(pio_clock, sm_clock, true);
+    pio_sm_set_enabled(pio_wait, sm_wait, true);
+    sleep_us(5);
+    TOGGLE();
+    TOGGLE();
 
-    TOGGLE();
-    TOGGLE();
     gpio_put(RESET_Pin, true);
 
     uint32_t dummy;
     while (true) {
-        dummy = pio_sm_get_blocking(pio, 1);
+        dummy = pio_sm_get_blocking(pio_wait, 1);
         TOGGLE();
-        sleep_us(1);
-        pio_sm_put(pio, 1, dummy);
+        //sleep_us(1);
+        pio_sm_put(pio_wait, 1, dummy);
         TOGGLE();
     }
 }

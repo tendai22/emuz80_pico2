@@ -21,7 +21,7 @@ lp2:
 .wrap             ; Blink forever!
 
 .program wait_control
-    set pins, 1 [20]
+    set pins, 0
     pull noblock    ; dummy pull for flush
 .wrap_target
     wait 0 gpio 25  ; pin 25
@@ -45,8 +45,6 @@ void clockgen_program_init(PIO pio, uint sm, uint offset, uint pin) {
    pio_gpio_init(pio, pin);
    pio_sm_set_consecutive_pindirs(pio, sm, pin, 1, true);
    pio_sm_config c = clockgen_program_get_default_config(offset);
-   // set_set_pin_base should have been adjusted by pio->gpiobase
-   // so far not so in set_set_pin_base();
    sm_config_set_set_pins(&c, pin, 1);
    pio_sm_init(pio, sm, offset, &c);
 }
@@ -55,8 +53,9 @@ void wait_control_program_init(PIO pio, uint sm, uint offset, uint pin) {
    pio_gpio_init(pio, pin);
    pio_sm_set_consecutive_pindirs(pio, sm, pin, 1, true);
    pio_sm_config c = wait_control_program_get_default_config(offset);
-   // set_set_pin_base should have been adjusted by pio->gpiobase
-   // so far not so in set_set_pin_base();
+   sm_config_set_in_pins(&c, 16);
+   sm_config_set_in_pin_count(&c, 8);
+   sm_config_set_out_pins(&c, 16, 8);
    sm_config_set_set_pins(&c, pin, 1);
    pio_sm_init(pio, sm, offset, &c);
 }
