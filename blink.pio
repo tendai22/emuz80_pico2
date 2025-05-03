@@ -41,55 +41,78 @@ lp2:
 ;.wrap
 
 ;
-; wait_mreq
-; 12 instructions
-.program wait_mreq
-   set pins, 1          ; WAIT High
-   wait 1 gpio 42       ; wait for RESET negate
-   wait 1 gpio 25       ; wait for MREQ High
-.wrap_target
-   wait 0 gpio 25
-   set pins, 0          ; WAIT Low
-   jmp pin mreq_end     ; RFSH cycle, skip it
-   in pins, 1           ; read pin26, RD
-   push                 ; put it to RX FIFO
-   irq wait 0            ; set IRQ0
-; irq wait 0 でソフト側で IRQ0 reset させた方がいいかもしれない。
-   irq nowait 2        ; set IRQ2 for databus driver
-   set pins, 1          ; WAIT High 
-mreq_end:
-   wait 1 gpio 25
-.wrap 
-
+; PIO1.SM0: wait_mreq
 ;
-; wait_iorq
-;
-.program wait_iorq
+; No IN/OUT/MOV/SET_BASE specified
+; JMP_PIN: 26(RFSH_Pin)
 ; 8 instructions
+.program wait_mreq
+    wait 1 gpio 42       ; wait for RESET negate
+    wait 1 gpio 25       ; wait for MREQ High
 .wrap_target
-   wait 0 gpio 24       ; IORQ
-   set pins, 0          ; WAIT Low
-   in pins, 2           ; read pin27,28, RD,M1
-   push                 ; put it to RX FIFO
-   irq wait 1            ; set IRQ1
-; irq wait 1 でソフト側で IRQ0 reset させた方がいいかもしれない。
-   set pins, 1          ; WAIT High
-   wait 1 gpio 24
-   irq nowait 2        ; set IRQ2 for databus driver
+mreq_top:
+    wait 0 gpio 25       ; wait MREQ Low
+    jmp pin mreq_end     ; RFSH cycle, skip it
+    jmp mreq_top
+mreq_end:
+    irq nowait 0         ; set IRQ0 High and wait it to Low
+    wait 1 gpio 25       ; wait for MREQ cycle end
+    irq clear 0          ; clear IRQ0
 .wrap
 
 ;
-; databus_read
-; 7 instructions
-.program databus_read
-    pull noblock            ; dummy read
+; PIO1.SM1: wait iorq ... top half
+;
+; No IN/OUT/MOV/SET_BASE specified
+; 4 instructions
+.program wait_iorq
 .wrap_target
-    pull                    ; wait for write data
-    out pins, 8             ; put it to D0-D7
-    mov pindirs, ~null      ; set PINDIR to all-one (output)
-    irq wait 2              ; wait for MREQ/IORQ read cycle end
-    irq clear 2
-    mov pindirs, null       ; set PINDIR to all-zero (input/Hi-Z)
+    wait 0 gpio 24      ; wait for IORQ Low
+    irq nowait 0        ; set IRQ0 High
+    wait 1 gpio 24      ; wait for IORQ cycle end
+    irq clear 0         ; clear IRQ0
+.wrap
+
+;
+; PIO1.SM2: access cycle ... bottom half
+;
+; IN_BASE: 24, IN_COUNT: 5(IORQ,MREQ,RFSH,RD,M1)
+; SET_BASE: 31(WAIT_Pin)
+; 6 instructions
+.program wait_access
+    wait 0 irq 0
+.wrap_target 
+    wait 1 irq 0        ; wait IRQ0 == 1, for MREQ/IORQ cycle
+    set pins, 0         ; WAIT Low
+    in pins, 5          ; read pin24-28, IORQ,MREQ,RFSH,RD,M1
+    push                ; put it to RX FIFO
+    wait 0 irq 0        ; wait IRQ0 == 0
+.wrap
+
+;
+; PIO1.SM3 databus control
+;
+; IN/OUT_BASE 16, IN/OUT_COUNT: 8(D0-D7)
+; JMP_PIN: 27(RD_Pin)
+; SET_BASE: 31(WAIT_Pin)
+; 12 instructions
+.program databus
+    pull noblock        ; dummy read
+.wrap_target
+    pull                ; wait for mainCPU event/write data
+    jmp pin write_cycle ; jmp if RD == 1, delay as wait for WR assert
+read_cycle:
+    out pins, 8         ; put it to D0-D7
+    mov pindirs, ~null  ; set PINDIR to all-one (output)
+    jmp cycle_end
+write_cycle:
+    in pins, 8
+    push                ; data send to mainCPU
+    pull                ; sync for mainCPU's process end
+cycle_end:
+    set pins, 1         ; WAIT High 
+    wait 0 irq 0  [2]   ; wait for MREQ/IORQ read cycle end
+    mov pindirs, null   ; set PINDIR to all-zero (input/Hi-Z)
 .wrap
 
 ;
@@ -121,45 +144,48 @@ void clockgen_program_init(PIO pio, uint sm, uint offset, uint pin) {
 }
 
 void wait_mreq_program_init(PIO pio, uint sm, uint offset, uint pin) {
-   // pin ... WAIT_Pin
-   pio_gpio_init(pio, pin);
-   pio_sm_set_consecutive_pindirs(pio, sm, pin, 1, true);
+   // sm ... 0
+   // pin (not used)
+   // JMP_PIN: 26 (RFSH_Pin)
    pio_sm_config c = wait_mreq_program_get_default_config(offset);
-   sm_config_set_jmp_pin(&c, RFSH_Pin);
-   sm_config_set_in_pins(&c, RD_Pin);
-   sm_config_set_in_pin_count(&c, 1);
-   sm_config_set_set_pins(&c, pin, 1);
+   sm_config_set_jmp_pin(&c, 26);
    sm_config_set_clkdiv(&c, 1);         // 1 ... full speed 
    pio_sm_init(pio, sm, offset, &c);
 }
 
 void wait_iorq_program_init(PIO pio, uint sm, uint offset, uint pin) {
-   // pin ... WAIT_Pin
-   pio_gpio_init(pio, pin);
-   pio_sm_set_consecutive_pindirs(pio, sm, pin, 1, true);
+   // sm ... 1
+   // pin ... not used
+   // No IN/OUT/MOV/SET_BASE
    pio_sm_config c = wait_iorq_program_get_default_config(offset);
-   sm_config_set_in_pins(&c, RD_Pin);
-   sm_config_set_set_pins(&c, pin, 1);
    sm_config_set_clkdiv(&c, 1);         // 1 ... full speed 
    pio_sm_init(pio, sm, offset, &c);
 }
 
-void databus_read_program_init(PIO pio, uint sm, uint offset) {
-   // pin ... WAIT_Pin
-   pio_sm_config c = databus_read_program_get_default_config(offset);
-   sm_config_set_in_pins(&c, 16);
-   sm_config_set_in_pin_count(&c, 8);
-   sm_config_set_out_pins(&c, 16, 8);
+void wait_access_program_init(PIO pio, uint sm, uint offset) {
+   // sm ... 2
+   // IN_BASE: 24(IORQ_Pin), IN_COUNT: 5(IORQ,MREQ,RFSH,RD,M1)
+   // pin ... 31(WAIT_Pin)
+   pio_sm_config c = wait_access_program_get_default_config(offset);
+   sm_config_set_in_pins(&c, 24);
+   sm_config_set_in_pin_count(&c, 5);
+   sm_config_set_set_pins(&c, sm, 1);
    sm_config_set_clkdiv(&c, 1);         // 1 ... full speed 
    pio_sm_init(pio, sm, offset, &c);
 }
 
-void databus_write_program_init(PIO pio, uint sm, uint offset) {
+void databus_program_init(PIO pio, uint sm, uint offset) {
+   // sm ... 3
+   // IN/OUT_BASE: 16(D0), IN/OUT_COUNT: 8(D0-D7)
+   // JMP_PIN: 27(RD_Pin)
+   // SET_BASE: 31(WAIT_Pin)
    // pin ... WAIT_Pin
-   pio_sm_config c = databus_write_program_get_default_config(offset);
+   pio_sm_config c = databus_program_get_default_config(offset);
    sm_config_set_in_pins(&c, 16);
    sm_config_set_in_pin_count(&c, 8);
    sm_config_set_out_pins(&c, 16, 8);
+   sm_config_set_jmp_pin(&c, 27);
+   sm_config_set_set_pins(&c, 31, 1);
    sm_config_set_clkdiv(&c, 1);         // 1 ... full speed 
    pio_sm_init(pio, sm, offset, &c);
 }

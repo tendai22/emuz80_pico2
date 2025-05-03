@@ -57,12 +57,12 @@ void wait_iorq_forever(PIO pio, uint sm, uint offset, uint pin) {
     wait_iorq_program_init(pio, sm, offset, pin);
 }
 
-void databus_read_forever(PIO pio, uint sm, uint offset) {
-    databus_read_program_init(pio, sm, offset);
+void wait_access_forever(PIO pio, uint sm, uint offset) {
+    wait_access_program_init(pio, sm, offset);
 }
 
-void databus_write_forever(PIO pio, uint sm, uint offset) {
-    databus_write_program_init(pio, sm, offset);
+void databus_forever(PIO pio, uint sm, uint offset) {
+    databus_program_init(pio, sm, offset);
 }
 
 
@@ -154,10 +154,10 @@ int main()
     wait_mreq_forever(pio_wait, 0, offset2, WAIT_Pin);
     offset2 = pio_add_program(pio_wait, &wait_iorq_program);
     wait_iorq_forever(pio_wait, 1, offset2, WAIT_Pin);
-    offset2 = pio_add_program(pio_wait, &databus_read_program);
-    databus_read_forever(pio_wait, 2, offset2);
-    offset2 = pio_add_program(pio_wait, &databus_write_program);
-    databus_write_forever(pio_wait, 3, offset2);
+    offset2 = pio_add_program(pio_wait, &wait_access_program);
+    wait_access_forever(pio_wait, 2, offset2);
+    offset2 = pio_add_program(pio_wait, &databus_program);
+    databus_forever(pio_wait, 3, offset2);
     // For more pio examples see https://github.com/raspberrypi/pico-examples/tree/master/pio
     int n = 10;
     while (n-- > 0) TOGGLE();
@@ -183,40 +183,27 @@ int main()
     uint32_t sm_flag, rw_flag;
     count = 0;
     while(true) {
-        while((sm_flag = (pio_wait->irq & 0x3)) == 0)
-            ;           // wait for IRQ0,IRQ1
-        sm_flag--;      // MREQ ... 0, IORQ ... 1
-        rw_flag = pio_sm_get_blocking(pio_wait, sm_flag);   // flag equals corresponding sm number
-                        // RD ... 0, WR ... 1, INTA ... 2 
-                        // INTA should be inverted in PIO asm program
-        switch (sm_flag) {
-        case 0:     // MREQ cycle
+        while((pio_wait->irq & 0x1) == 0)
+            ;           // wait for IRQ0
+        rw_flag = pio_sm_get_blocking(pio_wait, 2);   // flag equals corresponding sm number
+                        // IORQ,MREQ,RFSH,RD,M1
+        if (rw_flag & (1<<1)) { // MREQ
+            if (rw_flag & (1<<3) == 0) { // Read
             // mreq read cycle only
-            TOGGLE();
-            addr = (gpio_get_all() & 0xffff);
-            data = mem[addr];
-            pio_sm_put(pio_wait, 2, count++);
-            TOGGLE();
-            
-            //if (rw_flag == 0) {
-                // memory read cycle
-            //} else {
-                // memory write cycle
-            //}
-            break;
-        case 1:     // IORQ cycle
-            if (rw_flag == 0) {
-                // memory read cycle
-            } else {
-                // memory write cycle
+                TOGGLE();
+                addr = (gpio_get_all() & 0xffff);
+                data = mem[addr];
+                pio_sm_put(pio_wait, 3, count++);
+                TOGGLE();
+            } else {            // Write
+                TOGGLE();
+                data = pio_sm_get_blocking(pio_wait, sm_flag);
+                addr = (gpio_get_all() & 0xffff);
+                mem[addr] = data & 0xff;
+                pio_sm_put(pio_wait, 3, 0);
+                TOGGLE();
             }
-            break;
-        default:    // INTA cycle
-            // INTA cycle ... put int vector
-            break;
         }
-        pio_wait->irq = (pio_wait->irq & ~3);     // clear IRQ0,1
-
     }
 #if 0
     while (true) {
