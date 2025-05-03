@@ -679,3 +679,140 @@ RESET Highまで waitマシンを止めておくことで無事 High に貼り�
 
 これからデバッグ開始です。
 
+## JMP PINは１本しかみられない
+
+ここまで来て、考え直しが必要になった。
+
+「1ステートマシンあたり、待ち1本に補助1本しか使えない」ことに気づいた。
+
+これまでは、WAIT制御のPIOプログラム内部で、MREQ, IORQ を使ったポーリングや、RFSHサイクル時にアクセス処理しないを、GPIO見て条件分岐するJMPで行おうと思っていた。
+が、JMP PIM 命令では、ステートマシンのレジスタ、EXECCTRL_JMP_PIN に書き込んだピン番号でしか飛べない。つまり、ステートマシンごとに1本しか使えない。
+
+* メモリアクセス、IOアクセス(+INTA)の区別のため、それぞれにステートマシン1つを割り当てる。<br>SM0がMREQをwaitし、SM1がIORQをwaitする。
+* ソフト側で IRQ を見て、メモリ・IOどちらのサイクルが始まったかを知る。<br>IRQ0, IRQ1を割り当てる。
+* 対応するステートマシンのRX FIFOから読み出して、Read/Write/INTAサイクルかを知る。<br>IRQレジスタの値に2ビットマスクして、その値をステートマシン番号とすれば高速に計算できて良いだろう。
+* SM0(MREQ監視)は、JMP_PINを26(RFSH_Pin)とし、Lowの時はループ最後のMREQ High待ちまで飛ぶ。
+* SM0では、IN_BASEを27とする。これで、`in pins, 1`命令で、RDがビット1に得られ、この値をRX FIFOにpushする。
+* SM1では、IN_BASEを27とする。`in pins, 2`命令で、RD,M1がビット0,1に得られる。 
+#### SM0: メモリアクセス制御
+
+```
+; 8 instructions
+.wrap_target
+   wait 0 gpio 25
+   set pins, 0          ; WAIT Low
+   jmp pin mreq_end     ; RFSH cycle, skip it
+   in pins, 1           ; read pin26, RD
+   push                 ; put it to RX FIFO
+   irq wait 0            ; set IRQ0
+; irq wait 0 でソフト側で IRQ0 reset させた方がいいかもしれない。
+   set pins, 1          ; WAIT High 
+.mreq_end
+   wait 1 gpio 25
+.wrap 
+```
+
+* WAITをLowにする。
+* RDピンを読み取り push する。
+* IRQ0を立てる。
+* (データバスマシンがWAITをHighにするので)
+* MREQ Highを待ち先頭に戻る。
+
+### SM1: IORQアクセス制御
+
+```
+; 7 instructions
+.wrap_target
+   wait 0 gpio 24       ; IORQ
+   set pins, 0          ; WAIT Low
+   in pins, 2           ; read pin27,28, RD,M1
+   push                 ; put it to RX FIFO
+   irq wait 1            ; set IRQ1
+; irq wait 1 でソフト側で IRQ0 reset させた方がいいかもしれない。
+   set pins, 1          ; WAIT High
+   wait 1 gpio 24
+   irq nowait, 2        ; set IRQ2 for databus driver
+.wrap
+```
+
+* WAITをLowにする。
+* RD,M1ピンを読み取り push する。
+* IRQ1を立てる。
+* (データバスマシンがWAITをHighにするので)
+* IORQ Highを待ち先頭に戻る。
+
+
+### ソフト側のコード
+
+* IRQ0, 1を監視する。2ビットをポーリングし、どちらかが立つと抜ける。
+* SM0/SM1 RX FIFOから1ワード読み出し、モードを知る(Read/Write/INTA)
+* Read: アドレスバスから16ビット取り出し、メモリ配列から該当バイトを読み込み、SM2 TX FIFO に書き込む。
+* Write: アドレスバスから16ビット取り出し、SM3からデータバスを読み込み、メモリ配列に書き込む
+* INTA: SM3に1バイト(割り込み命令)をTX FIFOキューで送り込み、バスに出力させる。
+
+```
+    while((sm_flag = (pio->irq & 0x3)) == 0)
+        ;           // wait for IRQ0,IRQ1
+    sm_flag--;      // MREQ ... 0, IORQ ... 1
+    rw_flag = pio_sm_get_blocking(pio, sm_flag);   // flag equals corresponding sm number
+                    // RD ... 0, WR ... 1, INTA ... 2 
+                    // INTA should be inverted in PIO asm program
+    switch (sm_flag == 0) {
+    case 0:     // MREQ cycle
+        if (rw_flag == 0) {
+            // memory read cycle
+        } else {
+            // memory write cycle
+        }
+        break;
+    case 1:     // IORQ cycle
+        if (rw_flag == 0) {
+            // memory read cycle
+        } else {
+            // memory write cycle
+        }
+        break;
+    default:    // INTA cycle
+        // INTA cycle ... put int vector
+        break;
+    }
+    pio->irq = (pio->irq & ~3);     // clear IRQ0,1
+```
+
+## データバス制御
+
+* SM2,SM3 でリードアクセス、ライトアクセスする。
+
+SM2: リードアクセス
+
+* PINDIR を all one にして、pull/out pins, 8して D0-D7 に出力する。
+* IRQ2 を待つ。SM0,1がサイクル終了を教えてくれる。
+* irq clear 2
+* mov pindirs, null で D0-D7 を入力(Hi-Z)にする。
+
+```
+    pull                    ; wait for write data
+    out pins, 8             ; put it to D0-D7
+    mov pindirs, ~null      ; set PINDIR to all-one (output)
+    irq wait 2              ; wait for MREQ/IORQ cycle end
+    irq clear 2
+    mov pindirs, null       ; set PINDIR to all-zero (input/Hi-Z)
+```
+
+SM3: ライトアクセス
+
+* PINDIR は all zero のはず。
+* in pins, 8/push して RX FIFO にデータを置く。
+* IRQ2 を待つ。SM0,1がサイクル終了を教えてくれる。
+* irq clear 2
+* mov pindirs, null で D0-D7 を入力(Hi-Z)にする。
+
+```
+.wrap_target
+    pull                    ; wait for data read start from mainCPU program
+    in pins, 8              ; read D0-D7
+    push                    ; send to mainCPU program
+    irq wait 2              ; wait for MREQ/IORQ cycle end
+    irq clear 2
+.wrap
+```
