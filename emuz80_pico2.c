@@ -4,19 +4,25 @@
 #include "hardware/uart.h"
 #include "hardware/gpio.h"
 
-#include "blink.pio.h"
-
+//
+// Pin Definitions
+// This section should be located
+// before #include "blink.pio.h"
+//
 #define WAIT_Pin 31
 #define M1_Pin   28
 #define RD_Pin   27
 #define RFSH_Pin 26
 #define MREQ_Pin 25
+#define IORQ_Pin 24
 #define RESET_Pin 42
 #define BUSAK_Pin 29
 #define BUSRQ_Pin 43
 #define INT_Pin  41
 #define CLK_Pin  40
 #define TEST_Pin 45
+
+#include "blink.pio.h"
 
 void clockgen_pin_forever(PIO pio, uint sm, uint offset, uint pin, uint count) {
     clockgen_program_init(pio, sm, offset, pin);
@@ -30,8 +36,9 @@ void clockgen_pin_forever(PIO pio, uint sm, uint offset, uint pin, uint count) {
     pio->txf[sm] = count;
 }
 
+#if 0
 void wait_control_pin_forever(PIO pio, uint sm, uint offset, uint pin, uint freq) {
-    wait_control_program_init(pio, sm, offset, pin);
+    wait_control_pin_program_init(pio, sm, offset, pin);
     //pio_sm_set_enabled(pio, sm, true);
 
     //printf("Blinking pin %d at %d Hz\n", pin, freq);
@@ -40,6 +47,26 @@ void wait_control_pin_forever(PIO pio, uint sm, uint offset, uint pin, uint freq
     // input (wait for n + 1; mov; jmp)
     pio->txf[sm] = (125000000 / (2 * freq)) - 3;
 }
+#endif
+
+void wait_mreq_forever(PIO pio, uint sm, uint offset, uint pin) {
+    wait_mreq_program_init(pio, sm, offset, pin);
+}
+
+void wait_iorq_forever(PIO pio, uint sm, uint offset, uint pin) {
+    wait_iorq_program_init(pio, sm, offset, pin);
+}
+
+void databus_read_forever(PIO pio, uint sm, uint offset) {
+    databus_read_program_init(pio, sm, offset);
+}
+
+void databus_write_forever(PIO pio, uint sm, uint offset) {
+    databus_write_program_init(pio, sm, offset);
+}
+
+
+
 // UART defines
 // By default the stdout UART is `uart0`, so we will use the second one
 #define UART_ID uart0
@@ -91,7 +118,7 @@ int main()
 
     // GPIO Out
     gpio_out_init(WAIT_Pin, true);
-    gpio_out_init(RESET_Pin, true);
+    gpio_out_init(RESET_Pin, false);
     gpio_out_init(BUSRQ_Pin, true);
     gpio_out_init(INT_Pin, false);      // INT Pin has an inverter, so negate signal is needed
 
@@ -105,12 +132,15 @@ int main()
     // 
     gpio_init(BUSAK_Pin);
     gpio_init(MREQ_Pin);
+    gpio_init(IORQ_Pin);
+    gpio_init(RFSH_Pin);
+    gpio_init(RD_Pin);
 
     // PIO Blinking example
     //PIO pio_clock = pio0, pio_wait = pio1;
     PIO pio_clock = pio0;
-    PIO pio_wait = pio0;
-    uint sm_clock = 0, sm_wait = 1;
+    PIO pio_wait = pio1;
+    uint sm_clock = 0;
         
     //uint clk_pin = 41;
     //uint wait_pin = 31;
@@ -118,9 +148,16 @@ int main()
     pio_set_gpio_base(pio_wait, 16);
     // pio_set_gpio_base should be invoked before pio_add_program
     uint offset1 = pio_add_program(pio_clock, &clockgen_program);
-    clockgen_pin_forever(pio_clock, sm_clock, offset1, CLK_Pin, 50);
-    uint offset2 = pio_add_program(pio_wait, &wait_control_program);
-    wait_control_pin_forever(pio_wait, sm_wait, offset2, WAIT_Pin, 200000);
+    clockgen_pin_forever(pio_clock, sm_clock, offset1, CLK_Pin, 300);
+
+    uint offset2 = pio_add_program(pio_wait, &wait_mreq_program);
+    wait_mreq_forever(pio_wait, 0, offset2, WAIT_Pin);
+    offset2 = pio_add_program(pio_wait, &wait_iorq_program);
+    wait_iorq_forever(pio_wait, 1, offset2, WAIT_Pin);
+    offset2 = pio_add_program(pio_wait, &databus_read_program);
+    databus_read_forever(pio_wait, 2, offset2);
+    offset2 = pio_add_program(pio_wait, &databus_write_program);
+    databus_write_forever(pio_wait, 3, offset2);
     // For more pio examples see https://github.com/raspberrypi/pico-examples/tree/master/pio
     int n = 10;
     while (n-- > 0) TOGGLE();
@@ -130,11 +167,12 @@ int main()
     for (int i = 0 ; i < sizeof mem; ++i)
         mem[i] = 0;
 
-    // RESET assert
-    gpio_put(RESET_Pin, false); 
     // start clock
     pio_sm_set_enabled(pio_clock, sm_clock, true);
-    pio_sm_set_enabled(pio_wait, sm_wait, true);
+    pio_sm_set_enabled(pio_wait, 0, true);
+    //pio_sm_set_enabled(pio_wait, 1, true);  IORQ not yet be ready 
+    pio_sm_set_enabled(pio_wait, 2, true);
+    pio_sm_set_enabled(pio_wait, 3, true);
     sleep_us(5);
     TOGGLE();
     TOGGLE();
@@ -142,7 +180,45 @@ int main()
     gpio_put(RESET_Pin, true);
 
     uint32_t dummy, count, addr, data;
+    uint32_t sm_flag, rw_flag;
     count = 0;
+    while(true) {
+        while((sm_flag = (pio_wait->irq & 0x3)) == 0)
+            ;           // wait for IRQ0,IRQ1
+        sm_flag--;      // MREQ ... 0, IORQ ... 1
+        rw_flag = pio_sm_get_blocking(pio_wait, sm_flag);   // flag equals corresponding sm number
+                        // RD ... 0, WR ... 1, INTA ... 2 
+                        // INTA should be inverted in PIO asm program
+        switch (sm_flag) {
+        case 0:     // MREQ cycle
+            // mreq read cycle only
+            TOGGLE();
+            addr = (gpio_get_all() & 0xffff);
+            data = mem[addr];
+            pio_sm_put(pio_wait, 2, count++);
+            TOGGLE();
+            
+            //if (rw_flag == 0) {
+                // memory read cycle
+            //} else {
+                // memory write cycle
+            //}
+            break;
+        case 1:     // IORQ cycle
+            if (rw_flag == 0) {
+                // memory read cycle
+            } else {
+                // memory write cycle
+            }
+            break;
+        default:    // INTA cycle
+            // INTA cycle ... put int vector
+            break;
+        }
+        pio_wait->irq = (pio_wait->irq & ~3);     // clear IRQ0,1
+
+    }
+#if 0
     while (true) {
         dummy = pio_sm_get_blocking(pio_wait, 1);
         TOGGLE();
@@ -151,4 +227,5 @@ int main()
         pio_sm_put(pio_wait, 1, count++);
         TOGGLE();
     }
+#endif
 }
