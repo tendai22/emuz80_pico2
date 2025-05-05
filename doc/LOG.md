@@ -535,3 +535,297 @@ mm_pio->sm[0].execctrl =
 * TEST Pin が 45 でも 10 でも同じように出る。
 * ロジアナのスレシホールド 0.8V で出る。 1.3V で出なくなる。
 
+## wait control
+
+* MREQ Pin Low を待って起動
+* WAIT Low
+* ソフト側にイベント送付(push -> pio_sm_get_blocking(pio, 1))
+* ソフト側は pio_sm_get_blocking から戻ってくる。
+* アドレスバスを読み込み、READならデータバスにデータを載せる
+  WRITEならデータバスからデータを読み込む(ここ未実装)
+* 処理が終わると、pim_sm_put でメモリアクセス完了を通知する。
+* PIO側では pull で終了イベント発生を知る。
+* WAIT High にする。
+* MREQ Pin High を待つ。本サイクル終了を待つ。
+
+何もしないと、TX FIFO に１ワード何かが入っており、PIO側がうまくブロックしなかった。最初の pull noblock で読み出してフラッシュすることで、PIO側がうまくブロックするようになった。将来的にはC言語側で明示的にクリアするべき。
+
+```
+.program wait_control
+    set pins, 1 [20]
+    pull noblock    ; dummy pull for flush
+.wrap_target
+    wait 0 gpio 25  ; pin 25
+    set pins, 0     ; WAIT Low
+    push            ; notify an access occurs
+    pull block      ; wait for cpu's process finished
+    set pins, 1     ; WAIT High
+    wait 1 gpio 25  ; sleep until this cycle ends
+.wrap
+```
+
+```
+    uint32_t dummy;
+    while (true) {
+        dummy = pio_sm_get_blocking(pio, 1);
+        TOGGLE();
+        sleep_us(1);
+        pio_sm_put(pio, 1, dummy);
+        TOGGLE();
+    }
+```
+
+アドレスバスの読み込み、データバスの処理はまだ実装できていない。
+
+## データバス処理
+
+もう1つステートマシンを用意する。ステートマシン0, 1 はすでに OUT ピンを割り当てているため、D0-D7(GPIO16-GPIO23)をIN/OUTするには、別のステートマシンを用意してそこに割り当てる必要がある。
+
+このステートマシンも MREQ ピンを待つ。
+
+READ/WRITEを区別するには、RDピンを読んで分岐する。WRITEならデータバスを読み込み、RX FIFOにおく。ソフト側では pio_sm_get_blocking で２ワードを、１ワード目は all zero, 2ワードめで8bitデータを受け取る。READなら all one を返し、TX FIFO から8bitデータを取り出しデータバスに書き出す。PIODIRSにOUTをつけ、MREQ 1 を待つ。
+
+MREQ 1 となると、PIODIRSをINにして、ループの最初に戻る。
+
+sidesetをうまく使うとWAIT制御もできるかもしれない。
+
+## ピン監視・操作命令の対象ピンの決まり方
+
+> これらの各操作は GPIO の 4 つの連続した範囲の 1 つを使用し、各範囲のベースとカウントは各ステートマシンの PINCTRL レジスタで設定します。 OUT、SET、IN、およびサイドセット操作のそれぞれに範囲があります。 各範囲は、指定された PIO ブロック(RP2350 では 30 個のユーザ GPIO)にアクセス可能な GPIO のいずれかをカバーすることができ、範囲は重複することができます。
+
+Index オペランドは5ビットあるので、連続4つまで・5ビット中2ビットしか使えないという制約は、GPIOマッパのハードウェア的都合かな。
+
+WAIT, JMPのIndexは5ビット丸ごと有効です。PINCTRL_IN_BASE に0 or 16 を代入し、そこから連続32ピンしか使えない。
+
+ちなみに、PINCTRL_IN_BASE に 16 を代入して、GPIO10に set pins 命令でクロック出力できたのはなんなんだろうか。謎。
+
+* クロック生成でステートマシン1つ使う。set/sideset で最大連続2ビットを使う。現在は40, 41ピン。
+* WAIT生成、バスRead/Write/OE制御で2つめのステートマシンを使う。使えると思う。
+  + MREQ で wait する。もしくは MREQ/IORQ でビジーループ待ち。jmp pin で振り分ける。
+  + RD,RFSHで jmp pin を使う。正規のメモリアクセス抽出と、Read/Write で処理を分ける。
+  + IN/OUT は D0-D7 に割り当てる。8本の IN/OUT 命令と、OUT PINDIR でOE制御する。
+  + メインCPUプログラムとのやりとりは、RX FIFO, TX FIFO を使う。Z80 WriteデータをRX FIFOで渡し、Z80 ReadデータをTX FIFOで受け付ける。
+  + イベント発生もRX FIFOで渡す。RX FIFOの1つ目はRead/Write/MEM/IO/INTAフラグを渡す。Z80 Writeサイクルでは2つ目のデータを読み取る。Z80 ReadサイクルではRX FIFOを待ちに行かずにTX FIFOにデータを書き出し、ステートマシンがデータバスへの書き出しと、PINDIRの書き出しを行う。
+  + 全て終わるとwait 1 MREQ し、MREQ が１に戻ったらPINDIRをall zeroにする。
+* シリアルポートもステートマシン2つで実現すると、データ受信時のステータス改変ができるが、それは第２段階とする。最初は、メインCPU側でポーリングする。
+
+ということで、PIO 各ベースの割り当て案。PINCTRLレジスタはステートマシンごとに存在する。
+
+|type|SM|BASE|COUNT|description|
+|---|---|---|
+|SET|0|40|1 or 2|クロック発生をsidesetで行うように変更する。
+|IN|0|25|1|クロックストレッチを行う場合、このピンを監視して0の間は止める。
+|IN|1|16|8|データRead/Write/OE
+|OUT|1|16|8|データRead/Write/OE
+|SET|1|31|WAIT信号1ピンのみ(CPUによっては25,26,...と複数割り当ても想定している)
+|PINCTRL_MOV_BASE|NA|とりあえずunused
+
+## waitマシンの再構成
+
+* MREQを待つ。
+* RDで振り分ける。
+* Read(Z80 Write)時には、RX FIFOにall zeroを書き込み、INしてpush
+* Write(Z80 Read)時には、RX FIFOにall oneを書き込み、pullしてOUTする。OUT PINDIR alloneする。
+* Read/Writeとも終わると、wait 1, MREQする。
+* MREQが立ったら、OUT PINDIR allzero して先頭に戻る。
+
+* RX FIFOにall zeroを書き込むには、
+  + MOV ISR, NULL (or ~NULL)
+  + PUSH
+
+## pio 2個に分けなくても大丈夫
+
+クロック生成とwait機械を同じPIOでできるか？
+
+sm_config_set_in_pinsなどが smを引数に持たないので4sm共通ではないかと心配だったが、そうではなかった。
+
+プログラムごとにset_set_pinsしているが、(41と31で)それなりに動いているようだ。少し謎。
+
+## PIO設定後、runするまでの間のWAITを期待通りに設定できない
+
+Low になってしまう。命令実行すると最初の命令でHighにしてあるが、事前にgpio_putでHighにしていてもLowになってしまう。
+
+`pio_sm_set_pins64(pio, sm, pin);` を入れてみたが効果なし。
+
+RESET Highまで waitマシンを止めておくことで無事 High に貼り付けることができた。
+
+機械語先頭の `set pins 1` を抜くとゼロになった、失敗。
+
+## メモリリードを組んでみた
+
+動作しているかどうかは不明だが、まずコードを書いてみた。
+
+```
+.program wait_control
+    set pins, 1     ; WAIT High
+    pull noblock    ; dummy pull for flush
+    wait 1 gpio 42  ; wait for RESET negate
+    wait 1 gpio 25  ; assure MREQ High
+.wrap_target
+    wait 0 gpio 25  ; detect MREQ down edge
+    set pins, 0     ; WAIT Low
+    ; so far always READ
+    mov x, ~NULL    ; set X to all one
+    mov isr, X
+    mov pindirs, x  ; pindir is (all one)out
+    push            ; notify an access occurs
+    pull block      ; wait for cpu's process finished
+    out pins, 8
+    set pins, 1     ; WAIT High
+    wait 1 gpio 25  ; sleep until this cycle ends
+    mov pindirs, NULL   ; D0-D7 reset to 3-state (input)
+.wrap
+```
+
+これからデバッグ開始です。
+
+## JMP PINは１本しかみられない
+
+ここまで来て、考え直しが必要になった。
+
+「1ステートマシンあたり、待ち1本に補助1本しか使えない」ことに気づいた。
+
+これまでは、WAIT制御のPIOプログラム内部で、MREQ, IORQ を使ったポーリングや、RFSHサイクル時にアクセス処理しないを、GPIO見て条件分岐するJMPで行おうと思っていた。
+が、JMP PIM 命令では、ステートマシンのレジスタ、EXECCTRL_JMP_PIN に書き込んだピン番号でしか飛べない。つまり、ステートマシンごとに1本しか使えない。
+
+* メモリアクセス、IOアクセス(+INTA)の区別のため、それぞれにステートマシン1つを割り当てる。<br>SM0がMREQをwaitし、SM1がIORQをwaitする。
+* ソフト側で IRQ を見て、メモリ・IOどちらのサイクルが始まったかを知る。<br>IRQ0, IRQ1を割り当てる。
+* 対応するステートマシンのRX FIFOから読み出して、Read/Write/INTAサイクルかを知る。<br>IRQレジスタの値に2ビットマスクして、その値をステートマシン番号とすれば高速に計算できて良いだろう。
+* SM0(MREQ監視)は、JMP_PINを26(RFSH_Pin)とし、Lowの時はループ最後のMREQ High待ちまで飛ぶ。
+* SM0では、IN_BASEを27とする。これで、`in pins, 1`命令で、RDがビット1に得られ、この値をRX FIFOにpushする。
+* SM1では、IN_BASEを27とする。`in pins, 2`命令で、RD,M1がビット0,1に得られる。
+ 
+#### SM0: メモリアクセス制御
+
+```
+; 8 instructions
+.wrap_target
+   wait 0 gpio 25
+   set pins, 0          ; WAIT Low
+   jmp pin mreq_end     ; RFSH cycle, skip it
+   in pins, 1           ; read pin26, RD
+   push                 ; put it to RX FIFO
+   irq wait 0            ; set IRQ0
+; irq wait 0 でソフト側で IRQ0 reset させた方がいいかもしれない。
+   set pins, 1          ; WAIT High 
+.mreq_end
+   wait 1 gpio 25
+.wrap 
+```
+
+* WAITをLowにする。
+* RDピンを読み取り push する。
+* IRQ0を立てる。
+* (データバスマシンがWAITをHighにするので)
+* MREQ Highを待ち先頭に戻る。
+
+### SM1: IORQアクセス制御
+
+```
+; 7 instructions
+.wrap_target
+   wait 0 gpio 24       ; IORQ
+   set pins, 0          ; WAIT Low
+   in pins, 2           ; read pin27,28, RD,M1
+   push                 ; put it to RX FIFO
+   irq wait 1            ; set IRQ1
+; irq wait 1 でソフト側で IRQ0 reset させた方がいいかもしれない。
+   set pins, 1          ; WAIT High
+   wait 1 gpio 24
+   irq nowait, 2        ; set IRQ2 for databus driver
+.wrap
+```
+
+* WAITをLowにする。
+* RD,M1ピンを読み取り push する。
+* IRQ1を立てる。
+* (データバスマシンがWAITをHighにするので)
+* IORQ Highを待ち先頭に戻る。
+
+
+### ソフト側のコード
+
+* IRQ0, 1を監視する。2ビットをポーリングし、どちらかが立つと抜ける。
+* SM0/SM1 RX FIFOから1ワード読み出し、モードを知る(Read/Write/INTA)
+* Read: アドレスバスから16ビット取り出し、メモリ配列から該当バイトを読み込み、SM2 TX FIFO に書き込む。
+* Write: アドレスバスから16ビット取り出し、SM3からデータバスを読み込み、メモリ配列に書き込む
+* INTA: SM3に1バイト(割り込み命令)をTX FIFOキューで送り込み、バスに出力させる。
+
+```
+    while((sm_flag = (pio->irq & 0x3)) == 0)
+        ;           // wait for IRQ0,IRQ1
+    sm_flag--;      // MREQ ... 0, IORQ ... 1
+    rw_flag = pio_sm_get_blocking(pio, sm_flag);   // flag equals corresponding sm number
+                    // RD ... 0, WR ... 1, INTA ... 2 
+                    // INTA should be inverted in PIO asm program
+    switch (sm_flag == 0) {
+    case 0:     // MREQ cycle
+        if (rw_flag == 0) {
+            // memory read cycle
+        } else {
+            // memory write cycle
+        }
+        break;
+    case 1:     // IORQ cycle
+        if (rw_flag == 0) {
+            // memory read cycle
+        } else {
+            // memory write cycle
+        }
+        break;
+    default:    // INTA cycle
+        // INTA cycle ... put int vector
+        break;
+    }
+    pio->irq = (pio->irq & ~3);     // clear IRQ0,1
+```
+
+## データバス制御
+
+* SM2,SM3 でリードアクセス、ライトアクセスする。
+
+SM2: リードアクセス
+
+* PINDIR を all one にして、pull/out pins, 8して D0-D7 に出力する。
+* IRQ2 を待つ。SM0,1がサイクル終了を教えてくれる。
+* irq clear 2
+* mov pindirs, null で D0-D7 を入力(Hi-Z)にする。
+
+```
+    pull                    ; wait for write data
+    out pins, 8             ; put it to D0-D7
+    mov pindirs, ~null      ; set PINDIR to all-one (output)
+    irq wait 2              ; wait for MREQ/IORQ cycle end
+    irq clear 2
+    mov pindirs, null       ; set PINDIR to all-zero (input/Hi-Z)
+```
+
+SM3: ライトアクセス
+
+* PINDIR は all zero のはず。
+* in pins, 8/push して RX FIFO にデータを置く。
+* IRQ2 を待つ。SM0,1がサイクル終了を教えてくれる。
+* irq clear 2
+* mov pindirs, null で D0-D7 を入力(Hi-Z)にする。
+
+```
+.wrap_target
+    pull                    ; wait for data read start from mainCPU program
+    in pins, 8              ; read D0-D7
+    push                    ; send to mainCPU program
+    irq wait 2              ; wait for MREQ/IORQ cycle end
+    irq clear 2
+.wrap
+```
+
+ ## デバッグしてみる。
+
+ RD Low にしておいて、MREQ READ のみのデバッグ。
+
+ 初回の WAIT Low からメインCPUがデータを読み込んでいるが、IRQ 0 の先に行けていない感じ、WAIT Hign に戻っていない。
+
+ IRQ の扱いを再確認、メインCPUからIRQ set しないといかんができていない。
+
+ ## 4ステートマシンで33命令
+
+ 32命令の上限を超えている。
