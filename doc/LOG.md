@@ -869,17 +869,28 @@ blink.pio のCソース部分
 ```
 void clockgen_program_init(PIO pio, uint sm, uint offset, uint pin) {
    pio_gpio_init(pio, pin);
-   pio_gpio_init(pio, pin + 1);
-   pio_sm_set_consecutive_pindirs(pio, sm, pin, 2, true);
+   pio_sm_set_consecutive_pindirs(pio, sm, pin, 1, true);
    pio_sm_config c = clockgen_program_get_default_config(offset);
    // set_set_pin_base should have been adjusted by pio->gpiobase
    // so far not so in set_set_pin_base();
-   sm_config_set_set_pins(&c, pin, 2);
+   sm_config_set_set_pins(&c, pin, 1);
    sm_config_set_clkdiv(&c, 9.42);          // 16.0 ... 2.33MHz (420ns/cycle)
                                             //  9.42 ... 4.0MHz  (250ns/cycle)
    pio_sm_init(pio, sm, offset, &c);
 }
 ```
+
+## 単相2相の切り替え
+
+`void clockgen_program_init(PIO pio, uint sm, uint offset, uint pin, uint phase)` のように、単相(`phase=1`)、2相(`phase=2`)を切り替えるための引数を追加した。
+
+本来なら PIO プログラムも単相用に最適化するべきだが、2相命令も残してある。PIO ステートマシンとしては2相として動作しているが、出力ピンを1本に絞っているため単相に見える。
+
+ROMエミュレータ(ブランチ `rom_emulator`)でMREQをエミュレートするために、Low:10, High:1 の割合のパルスを生成させている。
+
+## ROMエミュレーション
+
+
 
 
 
