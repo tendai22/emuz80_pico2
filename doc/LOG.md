@@ -829,3 +829,58 @@ SM3: ライトアクセス
  ## 4ステートマシンで33命令
 
  32命令の上限を超えている。
+
+……かなり再構成したが、次の機会に。
+
+## 2相クロック
+
+clockgen を改造して2相出るようにした。
+
+* 連続する2ピンを割り当てる。ここでは、pin40(CLK_Pin), pin41(INT_Pin)とする。
+* 試作ボードでは INT_Pin はインバータでドライブしている。
+* pio_gpio_init(pio, pin) をピン数だけ呼び出す。
+* pio_sm_set_consecutive_pindirs(pio, sm, pin, 2, true); ピン数2を指定する。
+* sm_config_set_set_pins(&c, pin, 2); ピン数2を指定する。
+* PIOアセンブリコード
+
+```
+.program clockgen
+.wrap_target
+    set pins, 0   ; Turn LED on
+    set pins, 1   ; Turn LED off
+    set pins, 3
+    set pins, 2
+.wrap             ; Blink forever!
+```
+
+* set pins でバイナリを出力する。0,1,3,2 の順で出力することで2相出力となる。
+
+<img width=400 src="img/010-2-phase-clock.png"/>
+
+## 周波数指定
+
+* sm_config_set_clkdiv(&c, 9.42); 浮動小数点数で指定できる。
+* レジスタ的には、整数部 16bit, 小数部 16bit で指定する。
+
+## 2相クロックのコード
+
+blink.pio のCソース部分
+
+```
+void clockgen_program_init(PIO pio, uint sm, uint offset, uint pin) {
+   pio_gpio_init(pio, pin);
+   pio_gpio_init(pio, pin + 1);
+   pio_sm_set_consecutive_pindirs(pio, sm, pin, 2, true);
+   pio_sm_config c = clockgen_program_get_default_config(offset);
+   // set_set_pin_base should have been adjusted by pio->gpiobase
+   // so far not so in set_set_pin_base();
+   sm_config_set_set_pins(&c, pin, 2);
+   sm_config_set_clkdiv(&c, 9.42);          // 16.0 ... 2.33MHz (420ns/cycle)
+                                            //  9.42 ... 4.0MHz  (250ns/cycle)
+   pio_sm_init(pio, sm, offset, &c);
+}
+```
+
+
+
+

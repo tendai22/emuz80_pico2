@@ -33,7 +33,7 @@ void clockgen_pin_forever(PIO pio, uint sm, uint offset, uint pin, uint count) {
     // PIO counter program takes 3 more cycles in total than we pass as
     // input (wait for n + 1; mov; jmp)
     //pio->txf[sm] = (125000000 / (2 * freq)) - 3;
-    pio->txf[sm] = count;
+    //pio->txf[sm] = count;
 }
 
 #if 0
@@ -120,7 +120,7 @@ int main()
     gpio_out_init(WAIT_Pin, true);
     gpio_out_init(RESET_Pin, false);
     gpio_out_init(BUSRQ_Pin, true);
-    gpio_out_init(INT_Pin, false);      // INT Pin has an inverter, so negate signal is needed
+    //gpio_out_init(INT_Pin, false);      // INT Pin has an inverter, so negate signal is needed
 
     gpio_out_init(TEST_Pin, true);
     TOGGLE();

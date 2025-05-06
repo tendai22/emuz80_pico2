@@ -8,8 +8,10 @@
 
 .program clockgen
 .wrap_target
-    set pins, 0 [2]  ; Turn LED on
-    set pins, 1 [2]  ; Turn LED off
+    set pins, 0   ; Turn LED on
+    set pins, 1   ; Turn LED off
+    set pins, 3
+    set pins, 2
 .wrap             ; Blink forever!
 
 ;.program wait_control
@@ -129,11 +131,14 @@ cycle_end:
 
 void clockgen_program_init(PIO pio, uint sm, uint offset, uint pin) {
    pio_gpio_init(pio, pin);
+   pio_gpio_init(pio, pin + 1);
    pio_sm_set_consecutive_pindirs(pio, sm, pin, 2, true);
    pio_sm_config c = clockgen_program_get_default_config(offset);
    // set_set_pin_base should have been adjusted by pio->gpiobase
    // so far not so in set_set_pin_base();
    sm_config_set_set_pins(&c, pin, 2);
+   sm_config_set_clkdiv(&c, 9.42);          // 16.0 ... 2.33MHz (420ns/cycle)
+                                            //  9.42 ... 4.0MHz  (250ns/cycle)
    pio_sm_init(pio, sm, offset, &c);
 }
 
