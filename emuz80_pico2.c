@@ -149,13 +149,11 @@ int main()
     uint32_t addr, data;
     uint32_t count = 0;
     while(true) {
-        TOGGLE();
         pio_sm_get_blocking(pio, 1);    // wait for access event occurs
         TOGGLE();
         addr = (gpio_get_all() & 0xffff);
         data = mem[addr];
         TOGGLE();
-        pio_sm_put(pio, 1, count++);
-        TOGGLE();
+        pio_sm_put(pio, 1, data);
     }
 }

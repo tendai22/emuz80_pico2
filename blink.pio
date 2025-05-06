@@ -12,7 +12,7 @@
 .program clockgen
 .wrap_target
     ; outputs are inverted, so 0 means High, 1 means Low
-    set pins, 1 [10]  ; Turn LED on
+    set pins, 1 [6]  ; Turn LED on
     set pins, 0   ; Turn LED off
     set pins, 2
     set pins, 3
@@ -28,24 +28,19 @@
 ; 12 instructions
 .program databus
     pull noblock        ; dummy read
-    ;mov pindirs, null   ; D0-D7 as input
-    mov pindirs, ~null
+    mov pindirs, null   ; D0-D7 as input
+    set pins, 1
 .wrap_target
-    ;set pins, 1
-    ;wait 0 gpio 26
+    wait 0 gpio 26
     wait 0 gpio 27
     set pins, 0
-    push                ; notify an event occurs to mainCPU program
-    set pins, 1
+    push
     pull                ; wait for databus output data
-    set pins, 0
     out pins, 8         ; put it to D0-D7
-    mov pindirs, ~null [5] ; set PINDIR to all-one (output)
+    mov pindirs, ~null
     set pins, 1
-    ;wait 1 gpio 26
     wait 1 gpio 27 [7]  ; hold time 50ns (8ns x 7)
-    ;mov pindirs, null   ; D0-D7 Hi-Z
-    set pins, 0 [4]
+    mov pindirs, null
 .wrap
 
 % c-sdk {
@@ -69,7 +64,7 @@ void clockgen_program_init(PIO pio, uint sm, uint offset, uint pin, uint phase) 
     //   9.42 ... 4.0MHz  (250ns/cycle)
     // single clock: (2 instruction loop)
     //  19.0  
-    sm_config_set_clkdiv(&c, 6.0);
+    sm_config_set_clkdiv(&c, 5.0);
     pio_sm_init(pio, sm, offset, &c);
 }
 
@@ -78,6 +73,8 @@ void databus_program_init(PIO pio, uint sm, uint offset, uint debug_pin) {
    // IN/OUT_BASE: 16(D0), IN/OUT_COUNT: 8(D0-D7)
    // pin ... SET_BASE: as DEBUG_Pin
     pio_gpio_init(pio, debug_pin);
+    for (int i = 0; i < 8; ++i)
+        pio_gpio_init(pio, 16 + i);
     pio_sm_set_consecutive_pindirs(pio, sm, debug_pin, 1, true);
     pio_sm_config c = databus_program_get_default_config(offset);
     sm_config_set_in_pins(&c, 16);
