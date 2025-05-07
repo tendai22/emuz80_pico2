@@ -9,7 +9,7 @@
 // This section should be located
 // before #include "blink.pio.h"
 //
-#define WAIT_Pin 31
+#define WAIT_Pin 30
 #define M1_Pin   28
 #define RD_Pin   27
 #define RFSH_Pin 26
@@ -28,20 +28,9 @@
 
 #include "blink.pio.h"
 
+#if 0
 void clockgen_pin_forever(PIO pio, uint sm, uint offset, uint pin, uint phase) {
     clockgen_program_init(pio, sm, offset, pin, phase);
-}
-
-#if 0
-void wait_control_pin_forever(PIO pio, uint sm, uint offset, uint pin, uint freq) {
-    wait_control_pin_program_init(pio, sm, offset, pin);
-    //pio_sm_set_enabled(pio, sm, true);
-
-    //printf("Blinking pin %d at %d Hz\n", pin, freq);
-
-    // PIO counter program takes 3 more cycles in total than we pass as
-    // input (wait for n + 1; mov; jmp)
-    pio->txf[sm] = (125000000 / (2 * freq)) - 3;
 }
 #endif
 
@@ -101,7 +90,6 @@ int main()
     // Z80 Input pin initialize
 
     // GPIO Out
-    gpio_out_init(WAIT_Pin, true);
     gpio_out_init(RESET_Pin, false);
     gpio_out_init(BUSRQ_Pin, true);
     //gpio_out_init(INT_Pin, false);      // INT Pin has an inverter, so negate signal is needed
@@ -130,30 +118,39 @@ int main()
     pio_set_gpio_base(pio, 16);
     // pio_set_gpio_base should be invoked before pio_add_program
     uint offset1;
-    offset1 = pio_add_program(pio, &clockgen_program);
-    clockgen_pin_forever(pio, 0, offset1, CLK_Pin, 1);
 
     offset1 = pio_add_program(pio, &databus_program);
-    databus_forever(pio, 1, offset1, DEBUG_Pin);
+    databus_forever(pio, 1, offset1, WAIT_Pin);
     // For more pio examples see https://github.com/raspberrypi/pico-examples/tree/master/pio
     //int n = 10;
     //while (n-- > 0) TOGGLE();
     TOGGLE();
     TOGGLE();
     // start clock
-    pio_sm_set_enabled(pio, 0, true);
     pio_sm_set_enabled(pio, 1, true);
 
     //gpio_put(RESET_Pin, true);
 
     uint32_t addr, data;
     uint32_t count = 0;
+    int c, flag = true;             // true: write, false: read
+    gpio_put(RESET_Pin, true);       // OE
+    gpio_put(BUSRQ_Pin, flag);     
     while(true) {
-        pio_sm_get_blocking(pio, 1);    // wait for access event occurs
+        gpio_put(RESET_Pin, false);
         TOGGLE();
-        addr = (gpio_get_all() & 0xffff);
-        data = mem[addr];
+        data = pio_sm_get_blocking(pio, 1);    // wait for access event occurs
+        if (flag) {  // RD == 1, write
+            printf("WR: data = %02x\n", data);
+            getchar();
+            pio_sm_put(pio, 1, 38);  // dummy push
+        } else {    // RD == 0, read
+            //printf("RD: %02x\n", count);
+            pio_sm_put(pio, 1, count++);
+        }
         TOGGLE();
-        pio_sm_put(pio, 1, data);
+        sleep_us(1);
+        gpio_put(RESET_Pin, true);
+        sleep_us(1);
     }
 }
