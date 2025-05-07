@@ -829,3 +829,175 @@ SM3: ライトアクセス
  ## 4ステートマシンで33命令
 
  32命令の上限を超えている。
+
+……かなり再構成したが、次の機会に。
+
+## 2相クロック
+
+clockgen を改造して2相出るようにした。
+
+* 連続する2ピンを割り当てる。ここでは、pin40(CLK_Pin), pin41(INT_Pin)とする。
+* 試作ボードでは INT_Pin はインバータでドライブしている。
+* pio_gpio_init(pio, pin) をピン数だけ呼び出す。
+* pio_sm_set_consecutive_pindirs(pio, sm, pin, 2, true); ピン数2を指定する。
+* sm_config_set_set_pins(&c, pin, 2); ピン数2を指定する。
+* PIOアセンブリコード
+
+```
+.program clockgen
+.wrap_target
+    set pins, 0   ; Turn LED on
+    set pins, 1   ; Turn LED off
+    set pins, 3
+    set pins, 2
+.wrap             ; Blink forever!
+```
+
+* set pins でバイナリを出力する。0,1,3,2 の順で出力することで2相出力となる。
+
+<img width=400 src="img/010-2-phase-clock.png"/>
+
+## 周波数指定
+
+* sm_config_set_clkdiv(&c, 9.42); 浮動小数点数で指定できる。
+* レジスタ的には、整数部 16bit, 小数部 16bit で指定する。
+
+## 2相クロックのコード
+
+blink.pio のCソース部分
+
+```
+void clockgen_program_init(PIO pio, uint sm, uint offset, uint pin) {
+   pio_gpio_init(pio, pin);
+   pio_sm_set_consecutive_pindirs(pio, sm, pin, 1, true);
+   pio_sm_config c = clockgen_program_get_default_config(offset);
+   // set_set_pin_base should have been adjusted by pio->gpiobase
+   // so far not so in set_set_pin_base();
+   sm_config_set_set_pins(&c, pin, 1);
+   sm_config_set_clkdiv(&c, 9.42);          // 16.0 ... 2.33MHz (420ns/cycle)
+                                            //  9.42 ... 4.0MHz  (250ns/cycle)
+   pio_sm_init(pio, sm, offset, &c);
+}
+```
+
+## 単相2相の切り替え
+
+`void clockgen_program_init(PIO pio, uint sm, uint offset, uint pin, uint phase)` のように、単相(`phase=1`)、2相(`phase=2`)を切り替えるための引数を追加した。
+
+本来なら PIO プログラムも単相用に最適化するべきだが、2相命令も残してある。PIO ステートマシンとしては2相として動作しているが、出力ピンを1本に絞っているため単相に見える。
+
+ROMエミュレータ(ブランチ `rom_emulator`)でMREQをエミュレートするために、Low:10, High:1 の割合のパルスを生成させている。
+
+## out pins が出力されない。
+
+データバス出力がでなかった。理由は、`pio_gpio_init(pio, pin)` が抜けていた。
+
+```
+    for (int i = 0; i < 8; ++i)
+        pio_gpio_init(pio, 16 + i);
+```
+
+で動くようになった。
+
+## ROMエミュレーション
+
+CS, OE 端子を持ち、A0-A15, D0-D7 を持つ仮想的な ROM を考える。
+
+RP2350B で PIO を用いて、アクセスタイム 160ns で動くことを確認した。
+
+### 試行内容
+
+RP2350で、以下の割り当てで試行した。
+
+|name|GPIO|
+|---|---|
+|/CS|26|
+|/OE|27|
+|A0-A15|0-15|
+|D0-D7|16-23|
+
+PIOでステートマシン1つを用いる。ステートマシンの役割は、
+
+* /CS の監視... Highの間はデータバスに出力しない。
+* /OE の監視... /OE の下りエッジで ROM データの読み出しと出力を行う。
+* メインCPUへの通知... アクセス開始を知らせる
+* データの受け取り... メインCPUからデータバスに出力する値を受け取る。
+* データバス出力の戻し... /OE の上りエッジを検出し、データバスを High-Z に戻す。
+
+メインCPU側で、アドレスバスを読み込み、内部のバイト配列からROMデータを取り出し、PIOに渡す。
+
+* アクセス開始の検出... PIOステートマシンのRX FIFOデータ到着を待つ。
+* アドレスバスの読み込みとデータの取り出し。
+* データをPIOステートマシンに送る ...TX FIFOにデータを書き込む。
+
+### 信号のタイミング
+
+<img width=500 src="img/011-rom_emu_timing.png"/>
+
+MREQ・RD を模したクロック信号(0:灰色)を ROMエミュレータに加えた。茶色(1)は、メインCPU側のタイミング、赤(2)は、PIOコード側のタイミングを表す。
+
+赤(2)の上りエッジは、「データ出力開始」を表す。「MREQ・RDの下りエッジ」から「データ出力開始」までの時間は約 160ns、これが ROM としてのアクセスタイムに相当する。
+
+<img width=700 src="img/012-rom_emu_timing2xx.png"/>
+
+上図のタイミング(1,2,3,4,5,6)は以下の通り。コード内のコメント番号と対比させている。
+
+|色|番号|間隔[ns]|説明|
+|---|---|---|---|
+|緑|1|0|アクセス開始(/OEの下りエッジ)
+|青|2|30ns|PIOステートマシンが/OE下りエッジを検出、動作開始
+|紫|3|50ns|メインCPUがPIOステートマシンからのイベント検出、動作開始
+|赤|4|40ns|メインCPUが出力データをPIOステートマシンに送出完了
+|黄|5|40ns|PIOステートマシンがデータバスに出力開始
+|緑|6|100ns|アクセス完了(/OEの上りエッジ、Z80のデータラッチタイミング)
+
+1から5までが160ns、これをアクセスタイムと見なす。
+
+### PIOアセンブリコード
+
+```
+;
+; PIO0.SM1 databus control(program databus)
+;
+; IN/OUT_BASE 16, IN/OUT_COUNT: 8(D0-D7)
+; JMP_PIN: N/A(no need to output control pins)
+; SET_BASE: 31 (debug pin)
+; GPIO: CS: 26, OE: 27
+; 12 instructions
+.program databus
+    pull noblock        ; dummy read
+    mov pindirs, null   ; D0-D7 as input
+    set pins, 1
+.wrap_target
+    wait 0 gpio 26
+    wait 0 gpio 27      ; exit at detecting Timing 1
+    set pins, 0         ; Timing 2 (Green)
+    push                ; send an access event to mainCPU
+    pull                ; wait for databus output data
+    out pins, 8         ; put it to D0-D7
+    mov pindirs, ~null  ; DO-D7 output
+    set pins, 1         ; Timing 5 (Yellow)
+    wait 1 gpio 27 [7]  ; hold time 50ns (8ns x 7)
+    mov pindirs, null   ; D0-D7 Hi-Z
+.wrap
+```
+
+メインCPU側のコード
+
+```
+    uint32_t addr, data;
+    while(true) {
+        pio_sm_get_blocking(pio, 1);    // wait for access event occurs
+        TOGGLE();           // Timing 3 (Purple)
+        addr = (gpio_get_all() & 0xffff);
+        data = mem[addr];
+        TOGGLE();           // Timing 4 (Red)
+        pio_sm_put(pio, 1, data);
+    }
+}
+```
+
+アクセスタイム 100ns 以下も狙えるとの話もあったが、PIO と C-SDK を普通に使ったらこんなところだった。
+
+この試行は Z80 駆動の試行も兼ねている。Z80のステータス信号解釈を入れるとアクセスタイムはさらに延びる。それでも 300ns 程度には収まりそうだ。期待できる。
+
