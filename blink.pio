@@ -9,38 +9,95 @@
 ;
 ; PIO0:SM0 ... two/one phase clock generator(program clockgen)
 ;
+; SET: BASE: 40(CLK_Pin, inverted), 41(INT_Pin, inverted)
 .program clockgen
 .wrap_target
     ; outputs are inverted, so 0 means High, 1 means Low
     set pins, 1 [6]  ; Turn LED on
-    set pins, 0   ; Turn LED off
-    set pins, 2
-    set pins, 3
+    set pins, 0 [6]  ; Turn LED off
+; revive the following two lines if 2-phase clock feature we use
+    ;set pins, 2
+    ;set pins, 3
 .wrap             ; Blink forever!
 
 ;
-; PIO0.SM1 databus control(program databus)
+; PIO1, 3 sm's, total 30 instructions
+;
+
+;
+; PIO1.SM0: wait_mreq
+;
+; No IN/OUT/MOV/SET_BASE specified
+; JMP_PIN: 28(RFSH_Pin)(New assign)
+; GPIO: 42(RESET_Pin)
+;       25(MREQ_Pin)
+; 8 instructions
+.program wait_mreq
+    wait 1 gpio 42       ; wait for RESET negate
+    wait 1 gpio 25       ; wait for MREQ High
+.wrap_target
+mreq_top:
+    wait 0 gpio 28       ; wait MREQ Low
+    jmp pin mreq_end     ; RFSH cycle, skip it
+    jmp mreq_top
+mreq_end:
+    irq nowait 0         ; set IRQ0 High and wait it to Low
+    wait 1 gpio 25       ; wait for MREQ cycle end
+    irq clear 0          ; clear IRQ0
+.wrap
+
+;
+; PIO1.SM1: wait iorq ... top half
+;
+; No IN/OUT/MOV/SET_BASE specified
+; 4 instructions
+; GPIO 24(IORQ_Pin)(New assign)
+.program wait_iorq
+.wrap_target
+    wait 0 gpio 24      ; wait for IORQ Low
+    irq nowait 0        ; set IRQ0 High
+    wait 1 gpio 24      ; wait for IORQ cycle end
+    irq clear 0         ; clear IRQ0
+.wrap
+
+;
+; sending Z80 status is now omitted(previous PIO1:SM2), 
+; I expect getting it by mainCPU's gpio_get 
+;
+
+;
+; PIO1.SM2 databus control(program databus)
 ;
 ; IN/OUT_BASE 16, IN/OUT_COUNT: 8(D0-D7)
-; JMP_PIN: N/A(no need to output control pins)
-; SET_BASE: 31 (debug pin)
-; GPIO: CS: 26, OE: 27
-; 12 instructions
+; JMP_PIN: 26(RD_Pin)(New assign)
+; SET_BASE: 30(WAIT_Pin)(new assign), 
+;           31(DEBUG_Pin)(new assign)
+;     COUNT: 2
+; 18 instructions
 .program databus
     pull noblock        ; dummy read
-    mov pindirs, null   ; D0-D7 as input
-    set pins, 1
+    mov pindirs, null   ; D0-D7 Hi-Z
+    wait 0 irq 0
 .wrap_target
-    wait 0 gpio 26
-    wait 0 gpio 27
-    set pins, 0
-    push
-    pull                ; wait for databus output data
+    wait 1 irq 0
+    set pins, 0         ; WAIT Low
+    jmp pin write_cycle ; jmp if RD == 1, delay as wait for WR assert
+read_cycle:
+    push                ; notify an access event occurs
+    pull                ; wait for mainCPU event/write data
     out pins, 8         ; put it to D0-D7
-    mov pindirs, ~null
-    set pins, 1
-    wait 1 gpio 27 [7]  ; hold time 50ns (8ns x 7)
-    mov pindirs, null
+    mov pindirs, ~null  ; set PINDIR to all-one (output)
+    jmp cycle_end
+write_cycle:
+    nop [10]            ; some delay necessary for DB write data being stable
+    in pins, 8
+    push                ; data send to mainCPU
+    pull                ; sync for mainCPU's process end
+cycle_end:
+    set pins, 1         ; WAIT High 
+    wait 0 irq 0  [2]   ; wait for MREQ/IORQ read cycle end
+                        ; setup time about 20ns
+    mov pindirs, null   ; set PINDIR to all-zero (input/Hi-Z)
 .wrap
 
 % c-sdk {

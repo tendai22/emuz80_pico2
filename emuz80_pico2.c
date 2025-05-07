@@ -9,10 +9,11 @@
 // This section should be located
 // before #include "blink.pio.h"
 //
-#define WAIT_Pin 31
-#define M1_Pin   28
-#define RD_Pin   27
-#define RFSH_Pin 26
+#define DEBUG_Pin 31
+#define WAIT_Pin 30
+#define RFSH_Pin 28
+#define M1_Pin   27
+#define RD_Pin   26
 #define MREQ_Pin 25
 #define IORQ_Pin 24
 #define RESET_Pin 42
@@ -22,34 +23,27 @@
 #define CLK_Pin  40
 #define TEST_Pin 45
 
-#define CS_Pin 26   // RFSH_Pin
-#define OE_Pin 27   // RD_Pin
-#define DEBUG_Pin 43 // BUSRQ_Pin
-
 #include "blink.pio.h"
 
 void clockgen_pin_forever(PIO pio, uint sm, uint offset, uint pin, uint phase) {
     clockgen_program_init(pio, sm, offset, pin, phase);
 }
 
-#if 0
-void wait_control_pin_forever(PIO pio, uint sm, uint offset, uint pin, uint freq) {
-    wait_control_pin_program_init(pio, sm, offset, pin);
-    //pio_sm_set_enabled(pio, sm, true);
-
-    //printf("Blinking pin %d at %d Hz\n", pin, freq);
-
-    // PIO counter program takes 3 more cycles in total than we pass as
-    // input (wait for n + 1; mov; jmp)
-    pio->txf[sm] = (125000000 / (2 * freq)) - 3;
+void wait_mreq_forever(PIO pio, uint sm, uint offset, uint pin) {
+    wait_mreq_program_init(pio, sm, offset, pin);
 }
-#endif
+
+void wait_iorq_forever(PIO pio, uint sm, uint offset, uint pin) {
+    wait_iorq_program_init(pio, sm, offset, pin);
+}
+
+void wait_access_forever(PIO pio, uint sm, uint offset) {
+    wait_access_program_init(pio, sm, offset);
+}
 
 void databus_forever(PIO pio, uint sm, uint offset, uint debug_pin) {
     databus_program_init(pio, sm, offset, debug_pin);
 }
-
-
 
 // UART defines
 // By default the stdout UART is `uart0`, so we will use the second one
@@ -115,23 +109,30 @@ int main()
     // MREQ, IORQ, RD, RFSH, M1 are covered by PIO
     //
     gpio_init_mask(0xffff);     // A0-A15 input 
-    gpio_init(CS_Pin);
-    gpio_init(OE_Pin);
-    //gpio_init(BUSAK_Pin);
-    //gpio_init(MREQ_Pin);
-    //gpio_init(IORQ_Pin);
-    //gpio_init(RFSH_Pin);
-    //gpio_init(RD_Pin);
+    gpio_init(BUSAK_Pin);
+    gpio_init(MREQ_Pin);
+    gpio_init(IORQ_Pin);
+    gpio_init(RFSH_Pin);
+    gpio_init(RD_Pin);
 
     // PIO Blinking example
-    //PIO pio_clock = pio0, pio_wait = pio1;
-    PIO pio = pio0;
+    PIO pio_clock = pio0;
+    PIO pio_wait = pio1;
+    uint sm_clock = 0;
         
-    pio_set_gpio_base(pio, 16);
+    pio_set_gpio_base(pio_clock, 16);
+    pio_set_gpio_base(pio_wait, 16);
     // pio_set_gpio_base should be invoked before pio_add_program
     uint offset1;
-    offset1 = pio_add_program(pio, &clockgen_program);
-    clockgen_pin_forever(pio, 0, offset1, CLK_Pin, 1);
+    offset1 = pio_add_program(pio_clock, &clockgen_program);
+    clockgen_pin_forever(pio_clock, sm_clock, offset1, CLK_Pin, 1);
+
+    offset1 = pio_add_program(pio_wait, &wait_mreq_program);
+    wait_mreq_forever(pio_wait, 0, offset1, WAIT_Pin);
+    offset1 = pio_add_program(pio_wait, &wait_iorq_program);
+    wait_iorq_forever(pio_wait, 1, offset1, WAIT_Pin);
+    offset1 = pio_add_program(pio_wait, &databus_program);
+    wait_access_forever(pio_wait, 2, offset1);
 
     offset1 = pio_add_program(pio, &databus_program);
     databus_forever(pio, 1, offset1, DEBUG_Pin);
@@ -140,20 +141,43 @@ int main()
     //while (n-- > 0) TOGGLE();
     TOGGLE();
     TOGGLE();
+
+    // mem clear
+    for (int i = 0 ; i < sizeof mem; ++i)
+        mem[i] = 0;
     // start clock
-    pio_sm_set_enabled(pio, 0, true);
-    pio_sm_set_enabled(pio, 1, true);
+    // start clock
+    pio_sm_set_enabled(pio_clock, sm_clock, true);
+    pio_sm_set_enabled(pio_wait, 0, true);
+    pio_sm_set_enabled(pio_wait, 1, true);  //IORQ not yet be ready 
+    pio_sm_set_enabled(pio_wait, 2, true);
+    sleep_us(5);
+    TOGGLE();
+    TOGGLE();
 
-    //gpio_put(RESET_Pin, true);
+    gpio_put(RESET_Pin, true);
 
-    uint32_t addr, data;
-    uint32_t count = 0;
+    uint32_t addr, data, status;
     while(true) {
-        pio_sm_get_blocking(pio, 1);    // wait for access event occurs
-        TOGGLE();
-        addr = (gpio_get_all() & 0xffff);
-        data = mem[addr];
-        TOGGLE();
-        pio_sm_put(pio, 1, data);
+        // Wait for PIO1:IRQ0 High
+        while ((pio_wait->irq & 0x1) == 0)
+            ;
+        status = (gpio_get_all() >> 24) & 0xf;  // IORQ,MREQ,RD,M1
+        data = pio_sm_get_blocking(pio, 1);    // wait for access event occurs
+        if (status & 0x4) {     // Z80 Write mode: RD_Pin High
+            // Z80 Write
+            TOGGLE();
+            addr = gpio_get_all() & 0xffff;     // A0-A15 ... GPIO0-15
+            mem[addr] = data;
+            pio_sm_put(pio, 1, data);   // notify end of process
+            TOGGLE();
+        } else {            // Z80 Read mode: RD_Pin Low
+            // Z80 Read
+            TOGGLE();
+            addr = gpio_get_all() & 0xffff;     // A0-A15 ... GPIO0-15
+            data = mem[addr];
+            pio_sm_put(pio, 1, data);
+            TOGGLE();
+        }
     }
 }
