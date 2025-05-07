@@ -24,7 +24,7 @@
 
 #define CS_Pin 26   // RFSH_Pin
 #define OE_Pin 27   // RD_Pin
-#define DEBUG_Pin 43 // BUSRQ_Pin
+#define DEBUG_Pin 31 // BUSRQ_Pin
 
 #include "blink.pio.h"
 
