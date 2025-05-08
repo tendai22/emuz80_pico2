@@ -612,13 +612,13 @@ WAIT, JMPのIndexは5ビット丸ごと有効です。PINCTRL_IN_BASE に0 or 16
 ということで、PIO 各ベースの割り当て案。PINCTRLレジスタはステートマシンごとに存在する。
 
 |type|SM|BASE|COUNT|description|
-|---|---|---|
+|---|---|---|---|---|
 |SET|0|40|1 or 2|クロック発生をsidesetで行うように変更する。
 |IN|0|25|1|クロックストレッチを行う場合、このピンを監視して0の間は止める。
 |IN|1|16|8|データRead/Write/OE
 |OUT|1|16|8|データRead/Write/OE
-|SET|1|31|WAIT信号1ピンのみ(CPUによっては25,26,...と複数割り当ても想定している)
-|PINCTRL_MOV_BASE|NA|とりあえずunused
+|SET|1|31|0|WAIT信号1ピンのみ(CPUによっては25,26,...と複数割り当ても想定している)
+|PINCTRL_MOV_BASE|NA|NA|NA|とりあえずunused
 
 ## waitマシンの再構成
 
@@ -686,6 +686,7 @@ RESET Highまで waitマシンを止めておくことで無事 High に貼り�
 「1ステートマシンあたり、待ち1本に補助1本しか使えない」ことに気づいた。
 
 これまでは、WAIT制御のPIOプログラム内部で、MREQ, IORQ を使ったポーリングや、RFSHサイクル時にアクセス処理しないを、GPIO見て条件分岐するJMPで行おうと思っていた。
+
 が、JMP PIM 命令では、ステートマシンのレジスタ、EXECCTRL_JMP_PIN に書き込んだピン番号でしか飛べない。つまり、ステートマシンごとに1本しか使えない。
 
 * メモリアクセス、IOアクセス(+INTA)の区別のため、それぞれにステートマシン1つを割り当てる。<br>SM0がMREQをwaitし、SM1がIORQをwaitする。
@@ -886,7 +887,7 @@ void clockgen_program_init(PIO pio, uint sm, uint offset, uint pin) {
 
 本来なら PIO プログラムも単相用に最適化するべきだが、2相命令も残してある。PIO ステートマシンとしては2相として動作しているが、出力ピンを1本に絞っているため単相に見える。
 
-ROMエミュレータ(ブランチ `rom_emulator`)でMREQをエミュレートするために、Low:10, High:1 の割合のパルスを生成させている。
+ROMエミュレータ(ブランチ `rom_emulation`)でMREQをエミュレートするために、Low:10, High:1 の割合のパルスを生成させている。
 
 ## out pins が出力されない。
 
@@ -1027,3 +1028,108 @@ Z80駆動に戻る。blink.pio を書き直して、
 ## RAM上関数 __time_critical_func(xxx)
 
 関数名を `__time_critical_func(xxx)` で囲むだけで、隣家スクリプトの調整含めあんじょう良くやってくれる気配がある。後で試してみよう。
+
+## Z80 実物を駆動する準備
+
+ピンアサインの見直し・試作基板の再配線も完了した。
+
+* databus プログラムの動作確認
+  + 全体構成(但し irq の代わりに wait 25)の動作確認
+  + mov pindirs, null/~null で入出力できることの確認
+  + mainCPU側のソフトでデータバスデータを読み込める・書き込んだデータがD0-D7に現れることの角煮
+* wait_mreq から databus プログラムの連鎖
+  + IRQ0 ビットで wait_mreq から databus ループを起動できる。
+
+ここまでできれば、Z80 を挿して無限 NOP 動作を試行できる。
+
+### 全体構成
+
+* rom_emulation から blink.pio を持ち込み。
+* 変更した新しいピン割り当てに PIOプログラムを合わせる
+
+### mainCPU への読み込み、書き出しデータが期待通りでない
+
+mainCPU から書き出したデータがデータバスに現れない。D0-D7 のピンを 5V/GND につないでもダンプしたデータが変化しない。
+
+* in pins, 8/push のダンプが 80000000 と上8bitに現れる。
+* pull/out pins, 8 のD0-D2 3ビットロジアナ出力がゼロのまま。
+
+うーん、シフト方向が適切でないらしい。
+
+* in 側のシフトが右シフトになっている。これを左シフトに変える。
+* out 側のシフトも左方向?
+
+シフト方向は、
+
+```
+static inline void
+sm_config_set_in_shift(pio_sm_config *c, bool shift_right, bool autopush, uint push_threshold);
+```
+
+第2引数が、shift_right (true: 右シフト、false: 左シフト)のようだ。
+
+デフォルトの初期化では、
+
+```
+static inline pio_sm_config pio_get_default_sm_config(void) {
+    pio_sm_config c = {};
+#if PICO_PIO_USE_GPIO_BASE
+    c.pinhi = -1;
+#endif
+    sm_config_set_clkdiv_int_frac8(&c, 1, 0);
+    sm_config_set_wrap(&c, 0, 31);
+    sm_config_set_in_shift(&c, true, false, 32);
+    sm_config_set_out_shift(&c, true, false, 32);
+    return c;
+}
+```
+
+なので、in/out どちらも右シフトだ。
+
+これはよくない。左シフトに変換すべき。
+
+とりあえず、`sm_config_set_in_shift(&c, false, false, 32);` したら、mainCPU 側のダンプが 00, 80 など期待通りになった。
+
+`sm_config_set_out_shift(&c, false, false, 32);` していないのだが、変更しているうちにそれなりに出力されるようになった。ちょっと変。
+
+とりあえず、set_out_shift も設定するようにする。これで、
+
+* RD_Pin を外から ON/OFF することで Z80 Read/Z80 Write 動作を切り替えできる。
+* mainCPU からデータ書き出し(カウンタをインクリメントして書き出す)
+* mainCPU でデータバスの読み込み(D0-D7のどこかの1本を 5V/GNDにつないでシリアルダンプに反映されるか)
+
+ここまで動作確認ができた。
+
+> set_in_shift, set_out_shift シフト方向を整える。
+
+### set で2ピン出力ができない
+
+WAIT_Pin(30)の次を DEBUG_Pin(31) とした。これは PIOステートマシンの機械語デバッグのためにトグルできるようにだ。`SET_BASE` を 30, `SET_COUNT` を(1から)2と設定することでできるはず。
+
+と思ったが、ロジアナに出力が出てこない。
+
+`pio_gpio_init(pio, DEBUG_Pin)` が抜けていた。これを入れることでトグルが見られるようになった。
+
+> PIO初期化の最初で `pio_gpio_init()` 呼び出しを忘れないように。
+
+### IRQ 連鎖
+
+MREQ/IORQ の両方を監視する場合、wait 25, wait 24 は使えない。wait 25 で待つと、IORQ が Low になってもそこから抜け出せない。複数 PIN の OR 監視は難しい。
+
+逆に、AND 監視(/MREQ・RFSH)なら、
+
+```
+wait 0 gpio 25  ; MREQ Pin
+wait 1 gpio 28  ; RFSH Pin
+```
+
+とすれば、/MREQ・RFSH を満たすとここを抜けてくる。リフレッシュサイクルの間はここで足止めを喰らうはず。
+
+> PIO では複数 PIN の OR 監視は難しい
+
+現在のところ、IORQ 監視、MREQ 監視にステートマシンを1個ずつ割り当て、どちらかが検出すれば、databus プログラム用ステートマシンを起動する方法しか思いついていない。databus プログラム軌道には、IRQビットを用いる。
+
+OR 監視のために、外部に NAND ゲートをおいても良い気もする。今回のプロジェクトでは 2 チップにこだわりたいので、敢えてステートマシン2個使うことにする。
+
+> 5/8 今晩はここから。このあと、いよいよ Z80 をドライブする。
+
