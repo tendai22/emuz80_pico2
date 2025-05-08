@@ -1131,5 +1131,71 @@ wait 1 gpio 28  ; RFSH Pin
 
 OR 監視のために、外部に NAND ゲートをおいても良い気もする。今回のプロジェクトでは 2 チップにこだわりたいので、敢えてステートマシン2個使うことにする。
 
+## RAM 上で実行 copy_to_ram
+
+`no_flash` オプションに似ているが、そのものずばりのオプションを見つけた。`copy_to_ram`
+
+<img width=700 src="img/021-copy_to_ram.png"/>
+
+`pico_set_binary_type(...)` で指定できるようなので、`CMakeFile.txt` で指定するだけで良さそうだ。
+
+## PIO uart で printf を使う。
+
+* printf の出力先に独自デバイスを使う場合、`stdout_driver_t` 型を定義して、
+
+```
+stdio_driver_t stdio_uart = {
+    .out_chars = stdio_uart_out_chars,
+    .out_flush = stdio_uart_out_flush,
+    .in_chars = stdio_uart_in_chars,
+#if PICO_STDIO_UART_SUPPORT_CHARS_AVAILABLE_CALLBACK
+    .set_chars_available_callback = stdio_uart_set_chars_available_callback,
+#endif
+#if PICO_STDIO_ENABLE_CRLF_SUPPORT
+    .crlf_enabled = PICO_STDIO_UART_DEFAULT_CRLF
+#endif
+};
+```
+
+出力関数をメンバ `.out_chars` に設定しておいて、`stdio_set_driver_enabled` で設定すれば良さそうだ。 `stdio_driver_t` 型データはリストを形成して、 `printf` の際にリスト要素すべての `out_chars` を呼び出す様子。
+
+```
+void stdio_uart_init_full(struct uart_inst *uart, uint baud_rate, int tx_pin, int rx_pin) {
+    uart_instance = uart;
+    if (tx_pin >= 0) gpio_set_function((uint)tx_pin, UART_FUNCSEL_NUM(uart, tx_pin));
+    if (rx_pin >= 0) gpio_set_function((uint)rx_pin, UART_FUNCSEL_NUM(uart, rx_pin));
+    uart_init(uart_instance, baud_rate);
+    stdio_set_driver_enabled(&stdio_uart, true);
+}
+```
+
+最初は stdio_uart を使った出力として始めよう
+
+## stdio_uart の uart status 処理
+
+メインのメモリアクセス処理と同時に、uart チェックも行う。
+
+* (!TXFULL || !RXEMPTY) ならばフラグを更新する。条件分岐すると遅くなるので、毎回この値を書き込めばいいだろう。Z80 から UART ステータスレジスタを読みに来ると、この値をデコードして(8251 status register のビットパターンに変換して)返す。
+
+* 割込みを使う場合は、コントロールレジスタへの割込みイネーブル設定を解釈し、(!TXFULL || !RXEMPTY) の値が変わる。直前の値を保存しておき、違いがあれば割込み更新処理を起動する。
+* ここまでくると、16回に1回程度に間引いてもよいだろう。
+
+* (!TXFULL || !RXEMPTY) の値は以下の式で取る。
+
+```
+(uart_get_hw(uart)->fr & (UART_UARTFR_RXFE_BITS|UART_UARTFR_TXFF_BITS)) !=
+    (UART_UARTFR_TXFF_BITS)
+```
+
+TXFF == 1 && RXFE == 0 が唯一だめな状態なので、この2ビットの値が TXFF でないならばtrueを返せばよい、と考える。
+
+フラグの値(prev に保持して「直前の値と比較する」)は、
+
+```
+prev = (uart_get_hw(uart)->fr & (UART_UARTFR_RXFE_BITS|UART_UARTFR_TXFF_BITS)
+```
+
+でいいだろう。
+
 > 5/8 今晩はここから。このあと、いよいよ Z80 をドライブする。
 
