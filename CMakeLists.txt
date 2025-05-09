@@ -40,8 +40,7 @@ add_executable(emuz80_pico2 emuz80_pico2.c )
 pico_set_program_name(emuz80_pico2 "emuz80_pico2")
 pico_set_program_version(emuz80_pico2 "0.1")
 
-# no_flash means the target is to run from RAM
-#pico_set_binary_type(emuz80_pico2 no_flash)
+# copy_to_ram means bootloader copies binaries to RAM and execute it
 pico_set_binary_type(emuz80_pico2 copy_to_ram)
 
 # Generate PIO header
