@@ -1199,3 +1199,21 @@ prev = (uart_get_hw(uart)->fr & (UART_UARTFR_RXFE_BITS|UART_UARTFR_TXFF_BITS)
 
 > 5/8 今晩はここから。このあと、いよいよ Z80 をドライブする。
 
+## out pins, 8 が D0 出力すると動かない
+
+pioコードを減らしつつ様子を見ると、
+
+```
+;    jmp pin write_cycle ; jmp if RD == 1, delay as wait for WR assert
+```
+
+を有効にすると1発目で止まってしまう。無効にするとサイクルが動き続ける。
+
+databus_program_init で JMP_PIN の初期化を忘れていた。
+
+```
+    pio_gpio_init(pio, 26);     // RD_Pin
+    sm_config_set_jmp_pin(&c, 26);  // RD_Pin
+```
+
+を追加して、無事 out が動作するようになった。

@@ -38,8 +38,8 @@
 .wrap_target
 top:
     wait 0 gpio 25       ; wait MREQ Low
-    jmp pin mreq_end     ; RFSH cycle, skip it
-    jmp mreq_top
+    ;jmp pin mreq_end     ; RFSH cycle, skip it
+    ;jmp mreq_top
 mreq_end:
     set pins, 1
     irq set 0         ; set IRQ0 High and wait it to Low
@@ -79,7 +79,6 @@ mreq_top:
 ;     COUNT: 2
 ; 18 instructions
 .program databus
-    pull noblock        ; dummy read
     mov pindirs, null   ; D0-D7 Hi-Z
     set pins, 1
     wait 0 irq 0
@@ -145,6 +144,7 @@ void wait_mreq_program_init(PIO pio, uint sm, uint offset, uint rfsh_pin) {
 void databus_program_init(PIO pio, uint sm, uint offset, uint wait_pin) {
    // sm ... 3
    // IN/OUT_BASE: 16(D0), IN/OUT_COUNT: 8(D0-D7)
+   // JMP_BASE: 26(RD), COUNT: 1
    // pin ... SET_BASE: as WAIT_Pin/DEBUG_Pin
     pio_gpio_init(pio, wait_pin);
     for (int i = 0; i < 8; ++i)
@@ -155,6 +155,9 @@ void databus_program_init(PIO pio, uint sm, uint offset, uint wait_pin) {
     sm_config_set_in_pin_count(&c, 8);
     sm_config_set_in_shift(&c, false, false, 32);
     sm_config_set_out_pins(&c, 16, 8);
+    // JMP_PIN: 26(RD_Pin)
+    pio_gpio_init(pio, 26);     // RD_Pin
+    sm_config_set_jmp_pin(&c, 26);  // RD_Pin
     sm_config_set_out_shift(&c, true, false, 32);
     sm_config_set_set_pins(&c, wait_pin, 1);
     sm_config_set_clkdiv(&c, 1);         // 1 ... full speed 

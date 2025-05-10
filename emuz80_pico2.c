@@ -159,11 +159,12 @@ int main()
     gpio_put(RESET_Pin, true);
 
     uint32_t addr, data, status;
-    uint32_t count = 0;
+    uint32_t count = 1;
     while(true) {
         if (pio_sm_is_rx_fifo_empty(pio_wait, 2) == 0) {
             data = pio_sm_get_blocking(pio_wait, 2);    // wait for access event occurs
-            status = (gpio_get_all() >> 24) & 0xf;  // IORQ,MREQ,RD,M1
+            //status = (gpio_get_all() >> 24) & 0xf;  // IORQ,MREQ,RD,M1
+            status = 0x0;
             if (status & 0x4) {     // Z80 Write mode: RD_Pin High
                 // Z80 Write
                 TOGGLE();
@@ -176,9 +177,11 @@ int main()
                 TOGGLE();
                 addr = gpio_get_all() & 0xffff;     // A0-A15 ... GPIO0-15
                 data = mem[addr];
+                //sleep_us(2);
                 pio_sm_put(pio_wait, 2, count);
-                count += 2;
+                count += 1;
                 TOGGLE();
+                //sleep_us(50);
             }
         }
     }
