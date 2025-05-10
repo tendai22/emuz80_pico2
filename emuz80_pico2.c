@@ -145,6 +145,10 @@ int main()
     // mem clear
     for (int i = 0 ; i < sizeof mem; ++i)
         mem[i] = 0;
+    // debug Z80 codes
+    mem[0] = 0x20;
+    mem[1] = 0xfe;
+    mem[2] = 0x76;
     // start clock
     // start clock
     pio_sm_set_enabled(pio_clock, sm_clock, true);
@@ -158,30 +162,25 @@ int main()
     pio_sm_clear_fifos(pio_wait, 2);
     gpio_put(RESET_Pin, true);
 
-    uint32_t addr, data, status;
+    register uint32_t addr, status;
+    register uint32_t data;
     uint32_t count = 1;
     while(true) {
         if (pio_sm_is_rx_fifo_empty(pio_wait, 2) == 0) {
             data = pio_sm_get_blocking(pio_wait, 2);    // wait for access event occurs
-            //status = (gpio_get_all() >> 24) & 0xf;  // IORQ,MREQ,RD,M1
-            status = 0x0;
-            if (status & 0x4) {     // Z80 Write mode: RD_Pin High
-                // Z80 Write
+            status = (gpio_get_all() >> 24) & 0xf;  // IORQ,MREQ,RD,M1
+            if ((status & 0x4) == 0) {     // Z80 Read
+                // Z80 Read mode: RD_Pin Low
+                //TOGGLE();
+                pio_sm_put(pio_wait, 2, mem[gpio_get_all() & 0xffff]);
+                //TOGGLE();
+            } else {
+                // Z80 Write mode: RD_Pin High
                 TOGGLE();
                 addr = gpio_get_all() & 0xffff;     // A0-A15 ... GPIO0-15
                 mem[addr] = data;
                 pio_sm_put(pio_wait, 2, 21);   // notify end of process
                 TOGGLE();
-            } else {            // Z80 Read mode: RD_Pin Low
-                // Z80 Read
-                TOGGLE();
-                addr = gpio_get_all() & 0xffff;     // A0-A15 ... GPIO0-15
-                data = mem[addr];
-                //sleep_us(2);
-                pio_sm_put(pio_wait, 2, count);
-                count += 1;
-                TOGGLE();
-                //sleep_us(50);
             }
         }
     }

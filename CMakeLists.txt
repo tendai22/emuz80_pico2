@@ -50,6 +50,9 @@ pico_generate_pio_header(emuz80_pico2 ${CMAKE_CURRENT_LIST_DIR}/blink.pio)
 pico_enable_stdio_uart(emuz80_pico2 1)
 pico_enable_stdio_usb(emuz80_pico2 0)
 
+# compiler options
+target_compile_options(emuz80_pico2 PUBLIC -Ofast)
+
 # Add the standard library to the build
 target_link_libraries(emuz80_pico2
         pico_stdlib)

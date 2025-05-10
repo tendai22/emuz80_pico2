@@ -13,8 +13,8 @@
 .program clockgen
 .wrap_target
     ; outputs are inverted, so 0 means High, 1 means Low
-    set pins, 1 [6]  ; Turn LED on
-    set pins, 0 [6]  ; Turn LED off
+    set pins, 1  ; Turn LED on
+    set pins, 0  ; Turn LED off
 ; revive the following two lines if 2-phase clock feature we use
     ;set pins, 2
     ;set pins, 3
@@ -38,15 +38,13 @@
 .wrap_target
 top:
     wait 0 gpio 25       ; wait MREQ Low
-    ;jmp pin mreq_end     ; RFSH cycle, skip it
-    ;jmp mreq_top
+    jmp pin mreq_end     ; RFSH cycle, skip it
+    jmp top
 mreq_end:
-    set pins, 1
     irq set 0         ; set IRQ0 High and wait it to Low
     wait 1 gpio 25       ; wait for MREQ cycle end
     irq clear 0          ; clear IRQ0
 mreq_top:
-    set pins, 0
     jmp top
 .wrap
 
@@ -91,14 +89,15 @@ read_cycle:
     pull                ; wait for mainCPU event/write data
     out pins, 8         ; put it to D0-D7
     mov pindirs, ~null  ; set PINDIR to all-one (output)
+    set pins, 1         ; WAIT High 
     jmp cycle_end
 write_cycle:
     nop [10]            ; some delay necessary for DB write data being stable
     in pins, 8
+    set pins, 1         ; WAIT High 
     push                ; data send to mainCPU
     pull                ; sync for mainCPU's process end
 cycle_end:
-    set pins, 1         ; WAIT High 
     wait 0 irq 0  [2]   ; wait for MREQ/IORQ read cycle end
                         ; setup time about 20ns
     mov pindirs, null   ; set PINDIR to all-zero (input/Hi-Z)
@@ -124,18 +123,19 @@ void clockgen_program_init(PIO pio, uint sm, uint offset, uint pin, uint phase) 
     //  16.0 ... 2.33MHz (420ns/cycle)
     //   9.42 ... 4.0MHz  (250ns/cycle)
     // single clock: (2 instruction loop)
-    //  19.0  
-    sm_config_set_clkdiv(&c, 12.0);
+    //  18.7 ... 4.0MHz
+    //
+    sm_config_set_clkdiv(&c, 28.0);
     pio_sm_init(pio, sm, offset, &c);
 }
 
 void wait_mreq_program_init(PIO pio, uint sm, uint offset, uint rfsh_pin) {
     pio_gpio_init(pio, rfsh_pin);
-    pio_gpio_init(pio, 43);
-    pio_sm_set_consecutive_pindirs(pio, sm, 43, 1, true);
+    //pio_gpio_init(pio, 43);
+    //pio_sm_set_consecutive_pindirs(pio, sm, 43, 1, true);
     pio_sm_config c = databus_program_get_default_config(offset);
     sm_config_set_jmp_pin(&c, rfsh_pin);
-    sm_config_set_set_pins(&c, 43, 1);  // BUSRQ(43)
+    //sm_config_set_set_pins(&c, 43, 1);  // BUSRQ(43)
     sm_config_set_clkdiv(&c, 1);         // 1 ... full speed 
     pio_sm_init(pio, sm, offset, &c);
 
