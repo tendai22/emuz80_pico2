@@ -9,8 +9,9 @@
 // This section should be located
 // before #include "blink.pio.h"
 //
-#define DEBUG_Pin 31
-#define WAIT_Pin 30
+#define DEBUG_Pin 32
+#define WAIT_Pin 31
+#define WR_Pin   30
 #define RFSH_Pin 28
 #define M1_Pin   27
 #define RD_Pin   26
@@ -114,6 +115,7 @@ int main()
     gpio_init(IORQ_Pin);
     gpio_init(RFSH_Pin);
     gpio_init(RD_Pin);
+    gpio_init(WR_Pin);
 
     // PIO Blinking example
     PIO pio_clock = pio0;
@@ -146,9 +148,26 @@ int main()
     for (int i = 0 ; i < sizeof mem; ++i)
         mem[i] = 0;
     // debug Z80 codes
-    mem[0] = 0x20;
-    mem[1] = 0xfe;
+#if 0
+    // halt
     mem[2] = 0x76;
+#endif
+#if 0
+    // jr loop
+    mem[0] = 0x18;
+    mem[1] = 0xfe;
+#endif
+#if 1
+    // inc (hl) loop
+    mem[0] = 0x21;
+    mem[1] = 0x38;
+    mem[2] = 0x00;
+    mem[3] = 0x34;
+    mem[4] = 0x18;
+    mem[5] = 0xfd;
+    mem[6] = 0x0;
+#endif
+
     // start clock
     // start clock
     pio_sm_set_enabled(pio_clock, sm_clock, true);
@@ -164,21 +183,28 @@ int main()
 
     register uint32_t addr, status;
     register uint32_t data;
-    uint32_t count = 1;
+    int32_t count = 100;
     while(true) {
         if (pio_sm_is_rx_fifo_empty(pio_wait, 2) == 0) {
             data = pio_sm_get_blocking(pio_wait, 2);    // wait for access event occurs
             status = (gpio_get_all() >> 24) & 0xf;  // IORQ,MREQ,RD,M1
             if ((status & 0x4) == 0) {     // Z80 Read
                 // Z80 Read mode: RD_Pin Low
-                //TOGGLE();
-                pio_sm_put(pio_wait, 2, mem[gpio_get_all() & 0xffff]);
-                //TOGGLE();
+                TOGGLE();
+                addr = (gpio_get_all() & 0xffff);
+                data = mem[addr];
+                //if (count-- > 0) printf("%04X: %02X RD\r\n", addr, data);
+                pio_sm_put(pio_wait, 2, data);
+                //pio_sm_put(pio_wait, 2, 0);
+                TOGGLE();
             } else {
                 // Z80 Write mode: RD_Pin High
                 TOGGLE();
                 addr = gpio_get_all() & 0xffff;     // A0-A15 ... GPIO0-15
+                data = (gpio_get_all() & 0xff0000) >> 16;
                 mem[addr] = data;
+                //if (count-- > 0) printf("%04X: %02X WR\r\n", addr, data);
+                //sleep_ms(500);
                 pio_sm_put(pio_wait, 2, 21);   // notify end of process
                 TOGGLE();
             }

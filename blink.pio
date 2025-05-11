@@ -31,7 +31,7 @@
 ; JMP_PIN: 28(RFSH_Pin)(New assign)
 ; GPIO: 42(RESET_Pin)
 ;       25(MREQ_Pin)
-; 11 instructions
+; 9 instructions
 .program wait_mreq
     wait 1 gpio 42       ; wait for RESET negate
     wait 1 gpio 25       ; wait for MREQ High
@@ -71,18 +71,18 @@ mreq_top:
 ; PIO1.SM2 databus control(program databus)
 ;
 ; IN/OUT_BASE 16, IN/OUT_COUNT: 8(D0-D7)
-; JMP_PIN: 26(RD_Pin)(New assign)
-; SET_BASE: 30(WAIT_Pin)(new assign), 
-;           31(DEBUG_Pin)(new assign)
+; JMP_PIN: 26(RD_Pin)
+; SET_BASE: 31(WAIT_Pin), 
+;           32(DEBUG_Pin)
 ;     COUNT: 2
-; 18 instructions
+; 19 instructions
 .program databus
     mov pindirs, null   ; D0-D7 Hi-Z
     set pins, 1
     wait 0 irq 0
 .wrap_target
     wait 1 irq 0
-    set pins, 0 [5]        ; WAIT Low
+    set pins, 0        ; WAIT Low
     jmp pin write_cycle ; jmp if RD == 1, delay as wait for WR assert
 read_cycle:
     push                ; notify an access event occurs
@@ -92,11 +92,10 @@ read_cycle:
     set pins, 1         ; WAIT High 
     jmp cycle_end
 write_cycle:
-    nop [10]            ; some delay necessary for DB write data being stable
     in pins, 8
-    set pins, 1         ; WAIT High 
     push                ; data send to mainCPU
     pull                ; sync for mainCPU's process end
+    set pins, 1         ; WAIT High 
 cycle_end:
     wait 0 irq 0  [2]   ; wait for MREQ/IORQ read cycle end
                         ; setup time about 20ns
@@ -123,9 +122,12 @@ void clockgen_program_init(PIO pio, uint sm, uint offset, uint pin, uint phase) 
     //  16.0 ... 2.33MHz (420ns/cycle)
     //   9.42 ... 4.0MHz  (250ns/cycle)
     // single clock: (2 instruction loop)
-    //  18.7 ... 4.0MHz
-    //
-    sm_config_set_clkdiv(&c, 28.0);
+    //  50.0 ... 1.5MHz (660-670ns) 
+    //  30.0 ... 2.5MHz (400ns) ... no wait, 
+    //  18.7 ... 4.0-4.17MHz (250-260ns) .... 0/1 wait in M1, 1 wait in WR, 0/1 wait in RD
+    //  10.0 ... 7.1-7.6MHz (130-140ns) ... seems to work
+    //   5.0 ... 14-16MHz (60-70ns) ... does not works
+    sm_config_set_clkdiv(&c, 18.7);
     pio_sm_init(pio, sm, offset, &c);
 }
 
@@ -145,20 +147,23 @@ void databus_program_init(PIO pio, uint sm, uint offset, uint wait_pin) {
    // sm ... 3
    // IN/OUT_BASE: 16(D0), IN/OUT_COUNT: 8(D0-D7)
    // JMP_BASE: 26(RD), COUNT: 1
-   // pin ... SET_BASE: as WAIT_Pin/DEBUG_Pin
+   // pin ... SET_BASE: as WAIT_Pin(31)
     pio_gpio_init(pio, wait_pin);
     for (int i = 0; i < 8; ++i)
         pio_gpio_init(pio, 16 + i);
     pio_sm_set_consecutive_pindirs(pio, sm, wait_pin, 1, true);
     pio_sm_config c = databus_program_get_default_config(offset);
+    // IN_Pins: D0-D7 16-23
     sm_config_set_in_pins(&c, 16);
     sm_config_set_in_pin_count(&c, 8);
     sm_config_set_in_shift(&c, false, false, 32);
+    // OUT_Pins: D0-D7 16-23
     sm_config_set_out_pins(&c, 16, 8);
+    sm_config_set_out_shift(&c, true, false, 32);
     // JMP_PIN: 26(RD_Pin)
     pio_gpio_init(pio, 26);     // RD_Pin
     sm_config_set_jmp_pin(&c, 26);  // RD_Pin
-    sm_config_set_out_shift(&c, true, false, 32);
+    // SET_Pins: 31(Wait_Pin) 1 or 2(in case of DEBUG_Pin as 32)
     sm_config_set_set_pins(&c, wait_pin, 1);
     sm_config_set_clkdiv(&c, 1);         // 1 ... full speed 
     pio_sm_init(pio, sm, offset, &c);

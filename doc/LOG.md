@@ -1237,3 +1237,77 @@ databus_program_init で JMP_PIN の初期化を忘れていた。
 
 > その前に EMUZ80 の機能完成をめざす。つまり、UART を動かし、EMUBASIC/ASCIIART 動作が先となる。
 
+## 複数 PIO ユニットをまたぐイベント送付
+
+IRQレジスタは PIO を跨いでセットできない。`pio->irq` だから PIOユニットごとに1つあるということだから。
+
+## SMクロックの分数分周
+
+クロック分周器は 16 ビット整数、8 ビット分数で、分数分周器には 1 次の ΔΣ を使用する。 クロックは 1～65536 の間で変化する。
+
+小数点以下は 8 ビットなので、float型で渡した値の小数点以下の部分は 1/256 ～ 255/256 に丸めて書き込むのだろう。
+
+「一次のΔΣ」であるが、[「ΣΔ分周」でググって見つけた論文](https://www.jstage.jst.go.jp/article/ieejeiss/133/2/133_234/_pdf)によると、
+
+> 分数分周回路は分周数を可変とし、 *L* 回分周を行う間に *K* 回だけ分周比を *N* から *N+1* に変化させることににょり、平均分周数を式(1)のような分数の値とする。
+> 
+> $$ \bar{N} = \frac{(L - K)N + K(N + 1)}{L} = N + \frac{K}{L} $$
+
+だそうだ、(N + 1)分周のLow-High を K 回、のこりをN分周とするということらしい。
+
+確かに、4MHz 狙いで追い込むと、周期 240ns, 250ns が混在していた。クロックジッタ前提の分数分周と理解した。
+
+## PIO ピンの初期化
+
+WAIT_Pin 初期化をどうするか? C-SDKから命令を実行させる方法があるらしい。
+
+これは明日以後の宿題。
+
+## メモリリード・ライトのいったんの完成
+
+```
+                           1     .area TEST (ABS)
+0000                       2     .org 0
+0000 21 40 1F      [10]    3     ld  hl, 8000
+0003                       4 loop:
+0003 34            [11]    5     inc (hl)
+0004 18 FD         [12]    6     jr loop
+                           7     .end
+```
+
+`inc (hl)` を使いメモリライトサイクルの動作を確認する。
+
+最初、データバス確定前に `in pins, 8` してしまうことを恐れ、WR が Low になるまで待って WAIT を Low にするようにしていたが、これでは WAIT がかからない。T2 の下りエッジが WAIT サンプリングだが、WR が Low になるのはそれ以後である。それで、WAIT だと思っている間に CPU は爆走して次にタイミングがあうのが 0204 番地まで進んでからということだった。
+
+やはり、
+
+* MREQ 直後に RD を見て High ならその時点で WAIT Low にする。
+
+とすべきということだった。以下が PIO コードとなる。
+
+```
+.wrap_target
+    wait 1 irq 0
+    set pins, 0        ; WAIT Low
+    jmp pin write_cycle ; jmp if RD == 1, delay as wait for WR assert
+read_cycle:
+    ...
+    jmp cycle_end
+write_cycle:
+    in  pins, 8
+    push                ; data send to mainCPU
+    pull                ; sync for mainCPU's process end
+    set pins, 1         ; WAIT High 
+cycle_end:
+    wait 0 irq 0  [2]   ; wait for MREQ/IORQ read cycle end
+                        ; setup time about 20ns
+    mov pindirs, null   ; set PINDIR to all-zero (input/Hi-Z)
+.wrap
+```
+
+これでメモリリード・ライトサイクルがいったんの完成とする。
+
+次は uart レジスタのリード・ライトを組み込む。
+
+## UART レジスタリード・ライト
+
