@@ -1199,6 +1199,7 @@ int main()
     // copy prog1
     memcpy(&mem[0], &emuz80_binary[0], sizeof emuz80_binary);
     // debug Z80 codes
+#if 0
     for (int i = 0 ; i < sizeof emuz80_binary; ++i) {
         if (i % 8 == 0)
             printf("%04X ", i);
@@ -1207,6 +1208,7 @@ int main()
             printf("\n");
     }
     printf("\n");
+#endif
 #if 0
     // halt
     mem[2] = 0x76;
