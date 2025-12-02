@@ -3,7 +3,7 @@
 
 // emuz80 binary
 // source code: see emuz80.z80
-#define EMUBASIC 1
+//#define EMUBASIC 1
 
 #ifdef IO_TEST
 static const uint8_t emuz80_binary[0x2189] =
