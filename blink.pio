@@ -12,7 +12,7 @@
 ;   sideset: D0_Pin(16),D4_Pin(20), count: 4
 .program set_pindirs
 .origin 0
-.side_set 4
+.side_set 4 pindirs
 .wrap_target
     mov pc, pins side 0xf
     mov pc, pins side 0x0
@@ -22,9 +22,7 @@
 ; PIO0:SM2: data_out
 ;   OUT: D0_Pin(16), count: 8
 .program data_out
-    ;mov pindirs, ~null
 .wrap_target
-    ;wait 0 gpio 32       ; wait for RD_Pin negate
     out pins, 8
 .wrap
 
@@ -100,14 +98,13 @@ void clockgen_program_init(PIO pio, uint sm, uint offset, uint pin, uint phase) 
     //  18.7 ... 4.0-4.17MHz (250-260ns) .... 0/1 wait in M1, 1 wait in WR, 0/1 wait in RD
     //  10.0 ... 7.1-7.6MHz (130-140ns) ... seems to work
     //   5.0 ... 14-16MHz (60-70ns) ... does not works
-    sm_config_set_clkdiv(&c, 1000.0);
+    sm_config_set_clkdiv(&c, 5000.0);
     pio_sm_init(pio, sm, offset, &c);
 }
 
 void set_pindirs_program_init(PIO pio, uint sm, uint offset, uint data_pin, uint rd_pin) {
 	//   in: RD_Pin(32), count: 1
 	//   sideset: D0_Pin(16),D4_Pin(20), count: 4
-    pio_sm_set_consecutive_pindirs(pio, sm, data_pin, 4, true);
     pio_sm_set_consecutive_pindirs(pio, sm, rd_pin, 1, false);
     pio_sm_config c = set_pindirs_program_get_default_config(offset);
     sm_config_set_in_pins(&c, rd_pin);
@@ -122,8 +119,7 @@ void data_out_program_init(PIO pio, uint sm, uint offset, uint d0_pin) {
     pio_sm_set_consecutive_pindirs(pio, sm, d0_pin, 8, true);
     pio_sm_config c = data_out_program_get_default_config(offset);
     sm_config_set_out_pins(&c, d0_pin, 8);
-    sm_config_set_out_shift(&c, true, true, 32);
-    //sm_config_set_in_pin_count(&c, 8);
+    sm_config_set_out_shift(&c, true, true, 8);
     sm_config_set_clkdiv(&c, 1);         // 1 ... full speed 
     pio_sm_init(pio, sm, offset, &c);
 }

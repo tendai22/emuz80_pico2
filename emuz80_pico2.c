@@ -184,7 +184,7 @@ int main()
 	// RD,WR,MREQ,IORQ
 	//for (int i = 0; i < 8; ++i)
     //    pio_gpio_init(pio1, D0_Pin + i);
-	pio_gpio_init(pio1, RD_Pin);
+	//pio_gpio_init(pio1, RD_Pin);
 	pio_gpio_init(pio1, WR_Pin);
 	pio_gpio_init(pio1, MREQ_Pin);
 	pio_gpio_init(pio1, IORQ_Pin);
@@ -265,13 +265,16 @@ int main()
 
     pio_sm_clear_fifos(pio0, 2);
     gpio_put(RESET_Pin, true);
+    for (int i = 16; i < 24; ++i)
+        gpio_set_pulls(i, true, false);
 
     register uint32_t addr, status;
     register uint32_t data;
     int32_t count = 100;
-    register uint8_t c = 0;
+    register uint16_t c = 0;
     while(true) {
-        pio_sm_put(pio0, 2, c++);
+        sleep_us(1);
+        pio_sm_put(pio0, 2, ((c++)>>0));
     }
     //
     //
