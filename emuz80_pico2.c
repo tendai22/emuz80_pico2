@@ -239,6 +239,11 @@ int main()
     mem[0] = 0x18;
     mem[1] = 0xfe;
 #endif
+#if 1
+    mem[0] = 0xc3;
+    mem[1] = 0x00;
+    mem[2] = 0x00;
+#endif
 #if 0
     // inc (hl) loop
     mem[0] = 0x21;
@@ -265,16 +270,16 @@ int main()
 
     pio_sm_clear_fifos(pio0, 2);
     gpio_put(RESET_Pin, true);
-    for (int i = 16; i < 24; ++i)
-        gpio_set_pulls(i, true, false);
+    //for (int i = 16; i < 24; ++i)
+    //    gpio_set_pulls(i, true, false);
 
     register uint32_t addr, status;
     register uint32_t data;
     int32_t count = 100;
     register uint16_t c = 0;
     while(true) {
-        sleep_us(1);
-        pio_sm_put(pio0, 2, ((c++)>>0));
+        pio_sm_put(pio0, 2, mem[gpio_get_all() & 0xffff]);
+        //pio_sm_put(pio0, 2, 0);
     }
     //
     //
