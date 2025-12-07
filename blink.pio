@@ -39,25 +39,8 @@
 .wrap             ; Blink forever!
 
 ;
-; PIO1, 3 sm's, total 30 instructions
+; PIO1,
 ;
-
-;
-; PIO1:SM1: data_in
-;   IN: D0_Pin(16), count: 8
-.program data_in
-.wrap_target
-    ;wait 0 gpio 30      ; wait for WR_Pin negate
-    in pins, 8
-.wrap
-
-;
-; PIO1:SM2: control_in
-;   IN: RD_Pin(32), count: 4 (RD,WR,MREQ,IORQ)
-.program control_in
-.wrap_target
-    in pins, 4
-.wrap
 
 ;
 ; PIO1:SM3: iorq_wait
@@ -123,28 +106,6 @@ void data_out_program_init(PIO pio, uint sm, uint offset, uint d0_pin) {
     pio_sm_init(pio, sm, offset, &c);
 }
 
-void data_in_program_init(PIO pio, uint sm, uint offset, uint d0_pin) {
-	//	 IN: D0_Pin(16), count: 8
-    pio_sm_set_consecutive_pindirs(pio, sm, d0_pin, 8, false);
-    pio_sm_config c = data_in_program_get_default_config(offset);
-    sm_config_set_in_pins(&c, d0_pin);
-    sm_config_set_in_pin_count(&c, 8);
-    sm_config_set_in_shift(&c, false, true, 8);
-    sm_config_set_clkdiv(&c, 1);         // 1 ... full speed 
-    pio_sm_init(pio, sm, offset, &c);
-}
-
-void control_in_program_init(PIO pio, uint sm, uint offset, uint rd_pin) {
-	//	 IN: RD_Pin(32), count: 4 (RD,WR,MREQ,IORQ)
-    pio_sm_set_consecutive_pindirs(pio, sm, rd_pin, 4, false);
-    pio_sm_config c = control_in_program_get_default_config(offset);
-    sm_config_set_in_pins(&c, rd_pin);
-    sm_config_set_in_pin_count(&c, 4);
-    sm_config_set_in_shift(&c, false, true, 4);
-    sm_config_set_clkdiv(&c, 1);         // 1 ... full speed 
-    pio_sm_init(pio, sm, offset, &c);
-}
-
 void iorq_wait_program_init(PIO pio, uint sm, uint offset, uint iorq_pin, uint wait_pin) {
 	//   IN: IORQ_Pin(35), count 1
 	//	 SET: WAIT_Pin(31), count: 1
@@ -159,42 +120,4 @@ void iorq_wait_program_init(PIO pio, uint sm, uint offset, uint iorq_pin, uint w
     pio_sm_init(pio, sm, offset, &c);
 }
 
-#if 0
-void data_out_program_init(PIO pio, uint sm, uint offset, uint rd_pin, uint d0_pin) {
-    pio_gpio_init(pio, rd_pin);
-    pio_sm_set_consecutive_pindirs(pio, sm, rd_pin, 1, false);
-    sm_config_set_out_pins(&c, d0_pin, 8);
-    sm_config_set_out_shift(&c, true, false, 32);
-    pio_sm_config c = data_out_default_config(offset);
-    sm_config_set_clkdiv(&c, 1);         // 1 ... full speed 
-    pio_sm_init(pio, sm, offset, &c);
-
-}
-
-void databus_program_init(PIO pio, uint sm, uint offset, uint wait_pin) {
-   // sm ... 3
-   // IN/OUT_BASE: 16(D0), IN/OUT_COUNT: 8(D0-D7)
-   // JMP_BASE: 26(RD), COUNT: 1
-   // pin ... SET_BASE: as WAIT_Pin(31)
-    pio_gpio_init(pio, wait_pin);
-    for (int i = 0; i < 8; ++i)
-        pio_gpio_init(pio, 16 + i);
-    pio_sm_set_consecutive_pindirs(pio, sm, wait_pin, 1, true);
-    pio_sm_config c = databus_program_get_default_config(offset);
-    // IN_Pins: D0-D7 16-23
-    sm_config_set_in_pins(&c, 16);
-    sm_config_set_in_pin_count(&c, 8);
-    sm_config_set_in_shift(&c, false, false, 32);
-    // OUT_Pins: D0-D7 16-23
-    sm_config_set_out_pins(&c, 16, 8);
-    sm_config_set_out_shift(&c, true, false, 32);
-    // JMP_PIN: 26(RD_Pin)
-    pio_gpio_init(pio, 26);     // RD_Pin
-    sm_config_set_jmp_pin(&c, 26);  // RD_Pin
-    // SET_Pins: 31(Wait_Pin) 1 or 2(in case of DEBUG_Pin as 32)
-    sm_config_set_set_pins(&c, wait_pin, 1);
-    sm_config_set_clkdiv(&c, 1);         // 1 ... full speed 
-    pio_sm_init(pio, sm, offset, &c);
-}
-#endif
 %}

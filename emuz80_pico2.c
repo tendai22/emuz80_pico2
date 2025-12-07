@@ -198,18 +198,6 @@ int main()
 	pio_gpio_init(pio1, MREQ_Pin);
 	pio_gpio_init(pio1, IORQ_Pin);
 
-	// PIO1:SM1: data_in
-	//	 IN: D0_Pin(16), count: 8
-    offset1 = pio_add_program(pio1, &data_in_program);
-    data_in_program_init(pio1, 1, offset1, D0_Pin);
-    printf("data_in = %d\n", offset1);
-
-	// PIO1:SM2: control_in
-	//	 IN: RD_Pin(32), count: 4 (RD,WR,MREQ,IORQ)
-    offset1 = pio_add_program(pio1, &control_in_program);
-    control_in_program_init(pio1, 2, offset1, RD_Pin);
-    printf("control_in = %d\n", offset1);
-
 	// PIO1:SM3: iorq_wait
 	//   IN: IORQ_Pin, count 1
 	//	 SET: WAIT_Pin(31), count: 1
@@ -281,8 +269,6 @@ int main()
     pio_sm_set_enabled(pio0, 1, true);
     pio_sm_set_enabled(pio0, 2, true);
     pio_sm_set_enabled(pio0, 3, true);
-    pio_sm_set_enabled(pio1, 1, true);
-    pio_sm_set_enabled(pio1, 2, true);
     pio_sm_set_enabled(pio1, 3, true);
     sleep_us(10);
     TOGGLE();
@@ -307,13 +293,10 @@ int main()
 loop:
     while(((port = gpio_get_all()) & ((1<<XIORQ_Pin)|(1<<XWR_Pin))) == ((1<<XIORQ_Pin)|(1<<XWR_Pin))) {
         pio_sm_put(pio0, 2, mem[port & 0xffff]);
-        //pio_sm_put(pio1, 3, 0);
-        //pio_sm_get_blocking(pio1, 3);
     }
     if ((port & ((1<<XMREQ_Pin)|(1<<XWR_Pin))) == 0) {
         TOGGLE();
         mem[port & 0xffff] = (port >> D0_Pin);
-        //mem[port & 0xffff]  = pio_sm_get(pio1, 1);
         TOGGLE();
         goto loop;
     }
