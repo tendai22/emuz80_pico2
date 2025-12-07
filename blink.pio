@@ -13,10 +13,8 @@
 .program set_pindirs
 .origin 0
 .side_set 4 pindirs
-.wrap_target
     mov pc, pins side 0xf
     mov pc, pins side 0x0
-.wrap
 
 ;
 ; PIO0:SM2: data_out
@@ -49,7 +47,7 @@
 ;   IN: D0_Pin(16), count: 8
 .program data_in
 .wrap_target
-    wait 0 gpio 33      ; wait for WR_Pin negate
+    ;wait 0 gpio 30      ; wait for WR_Pin negate
     in pins, 8
 .wrap
 
@@ -71,6 +69,7 @@
     pull                ; wait for MainCPU work done
     set pins, 1         ; WAIT_Pin(31) High
     wait 1 gpio 35     ; IORQ_Pin(35)
+    push
 .wrap
 
 % c-sdk {
@@ -98,7 +97,7 @@ void clockgen_program_init(PIO pio, uint sm, uint offset, uint pin, uint phase) 
     //  18.7 ... 4.0-4.17MHz (250-260ns) .... 0/1 wait in M1, 1 wait in WR, 0/1 wait in RD
     //  10.0 ... 7.1-7.6MHz (130-140ns) ... seems to work
     //   5.0 ... 14-16MHz (60-70ns) ... does not works
-    sm_config_set_clkdiv(&c, 18.0);
+    sm_config_set_clkdiv(&c, 19.0);
     pio_sm_init(pio, sm, offset, &c);
 }
 
@@ -130,7 +129,7 @@ void data_in_program_init(PIO pio, uint sm, uint offset, uint d0_pin) {
     pio_sm_config c = data_in_program_get_default_config(offset);
     sm_config_set_in_pins(&c, d0_pin);
     sm_config_set_in_pin_count(&c, 8);
-    sm_config_set_in_shift(&c, true, true, 8);
+    sm_config_set_in_shift(&c, false, true, 8);
     sm_config_set_clkdiv(&c, 1);         // 1 ... full speed 
     pio_sm_init(pio, sm, offset, &c);
 }
@@ -141,7 +140,7 @@ void control_in_program_init(PIO pio, uint sm, uint offset, uint rd_pin) {
     pio_sm_config c = control_in_program_get_default_config(offset);
     sm_config_set_in_pins(&c, rd_pin);
     sm_config_set_in_pin_count(&c, 4);
-    sm_config_set_in_shift(&c, true, true, 4);
+    sm_config_set_in_shift(&c, false, true, 4);
     sm_config_set_clkdiv(&c, 1);         // 1 ... full speed 
     pio_sm_init(pio, sm, offset, &c);
 }
@@ -152,8 +151,8 @@ void iorq_wait_program_init(PIO pio, uint sm, uint offset, uint iorq_pin, uint w
     pio_sm_set_consecutive_pindirs(pio, sm, iorq_pin, 1, false);
     pio_sm_set_consecutive_pindirs(pio, sm, wait_pin, 1, true);
     pio_sm_config c = iorq_wait_program_get_default_config(offset);
-    sm_config_set_in_pins(&c, iorq_pin);
-    sm_config_set_in_pin_count(&c, 1);
+    //sm_config_set_in_pins(&c, iorq_pin);
+    //sm_config_set_in_pin_count(&c, 1);
     sm_config_set_set_pins(&c, wait_pin, 1);
     //sm_config_set_set_pin_count(&c, 1);
     sm_config_set_clkdiv(&c, 1);         // 1 ... full speed 

@@ -15,6 +15,10 @@
 #define WR_Pin   33
 #define MREQ_Pin 34
 #define IORQ_Pin 35
+#define XRD_Pin 26
+#define XWR_Pin 30
+#define XMREQ_Pin 25
+#define XIORQ_Pin 24
 #define DEBUG_Pin 36
 #define WAIT_Pin 31
 #define RFSH_Pin 28
@@ -24,7 +28,7 @@
 #define BUSRQ_Pin 43
 #define INT_Pin  41
 #define CLK_Pin  40
-#define TEST_Pin 44
+#define TEST_Pin 45
 
 #include "blink.pio.h"
 
@@ -59,7 +63,7 @@
 #define UART_RX_PIN 47 //1
 
 static int toggle_value = 1;
-#define TOGGLE() do {    gpio_xor_mask64(((uint64_t)1)<<TEST_Pin); sleep_us(1); } while(0)
+#define TOGGLE() do {    gpio_xor_mask64(((uint64_t)1)<<TEST_Pin); } while(0)
 //#define TOGGLE() do {    (*(volatile uint32_t *)&(sio_hw->gpio_hi_togl)) = 1; } while(0)
 //#define TOGGLE() do { gpio_put(TEST_Pin, (toggle_value ^= 1));    } while(0)
 
@@ -142,6 +146,11 @@ int main()
     gpio_init(RD_Pin);
     gpio_init(WR_Pin);
 
+    gpio_init(XMREQ_Pin);
+    gpio_init(XIORQ_Pin);
+    gpio_init(XRD_Pin);
+    gpio_init(XWR_Pin);
+
     // PIO Blinking example
     PIO pio_clock = pio0;
     PIO pio_wait = pio1;
@@ -184,7 +193,7 @@ int main()
 	// RD,WR,MREQ,IORQ
 	//for (int i = 0; i < 8; ++i)
     //    pio_gpio_init(pio1, D0_Pin + i);
-	//pio_gpio_init(pio1, RD_Pin);
+	pio_gpio_init(pio1, RD_Pin);
 	pio_gpio_init(pio1, WR_Pin);
 	pio_gpio_init(pio1, MREQ_Pin);
 	pio_gpio_init(pio1, IORQ_Pin);
@@ -211,6 +220,7 @@ int main()
     //int n = 10;
     //while (n-- > 0) TOGGLE();
     TOGGLE();
+    sleep_us(1);
     TOGGLE();
 
     // mem clear
@@ -239,10 +249,20 @@ int main()
     mem[0] = 0x18;
     mem[1] = 0xfe;
 #endif
-#if 1
+#if 0
+    // JP 0000H
     mem[0] = 0xc3;
     mem[1] = 0x00;
     mem[2] = 0x00;
+#endif
+#if 1
+    // INC (HL), JR 0xfc
+    mem[0] = 0x21;  // LD HL, 7F00H
+    mem[1] = 0x00;
+    mem[2] = 0x7f;
+    mem[3] = 0x34;  // INC (HL)
+    mem[4] = 0x18;  // JR
+    mem[5] = 0xfd;  // -2
 #endif
 #if 0
     // inc (hl) loop
@@ -261,29 +281,48 @@ int main()
     pio_sm_set_enabled(pio0, 1, true);
     pio_sm_set_enabled(pio0, 2, true);
     pio_sm_set_enabled(pio0, 3, true);
-    //pio_sm_set_enabled(pio1, 1, true);
-    //pio_sm_set_enabled(pio1, 2, true);
-    //pio_sm_set_enabled(pio1, 3, true);
+    pio_sm_set_enabled(pio1, 1, true);
+    pio_sm_set_enabled(pio1, 2, true);
+    pio_sm_set_enabled(pio1, 3, true);
     sleep_us(10);
     TOGGLE();
     TOGGLE();
+
+    for (int i = 0; i < 10; ++i) {
+        TOGGLE();
+        sleep_us(1);
+        TOGGLE();
+        sleep_us(1);
+    }
 
     pio_sm_clear_fifos(pio0, 2);
     gpio_put(RESET_Pin, true);
     //for (int i = 16; i < 24; ++i)
     //    gpio_set_pulls(i, true, false);
 
-    register uint32_t addr, status;
-    register uint32_t data;
+    register uint32_t port;
     int32_t count = 100;
-    register uint16_t c = 0;
-    while(true) {
-        pio_sm_put(pio0, 2, mem[gpio_get_all() & 0xffff]);
-        //pio_sm_put(pio0, 2, 0);
+    register uint8_t c = 0;
+    int32_t temp;
+loop:
+    while(((port = gpio_get_all()) & ((1<<XIORQ_Pin)|(1<<XWR_Pin))) == ((1<<XIORQ_Pin)|(1<<XWR_Pin))) {
+        pio_sm_put(pio0, 2, mem[port & 0xffff]);
+        //pio_sm_put(pio1, 3, 0);
+        //pio_sm_get_blocking(pio1, 3);
     }
+    if ((port & ((1<<XMREQ_Pin)|(1<<XWR_Pin))) == 0) {
+        TOGGLE();
+        mem[port & 0xffff] = (port >> D0_Pin);
+        //mem[port & 0xffff]  = pio_sm_get(pio1, 1);
+        TOGGLE();
+        goto loop;
+    }
+    goto loop;
     //
     //
-    //  
+    //
+    //
+#if 0  
     while(true) {
         if (pio_sm_is_rx_fifo_empty(pio_wait, 2) == 0) {
             data = pio_sm_get_blocking(pio_wait, 2);    // wait for access event occurs
@@ -334,4 +373,5 @@ int main()
             }
         }
     }
+#endif
 }
