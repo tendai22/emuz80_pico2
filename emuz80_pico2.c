@@ -267,14 +267,14 @@ int main()
     mem[5] = 0xfd;
     mem[6] = 0x0;
 #endif
-#if 0
+#if 1
     // in 0h loop
     mem[0] = 0xdb;  // IN 0H
     mem[1] = 0x00;
     mem[2] = 0x18;  // jr
     mem[3] = 0xfc;  // -4 
 #endif
-#if 1
+#if 0
     // out 0h loop
     mem[0] = 0xd3;  // OUT 0H
     mem[1] = 0x00;
@@ -284,11 +284,13 @@ int main()
 #endif
 
     // start PIO state machines
-    pio_sm_set_enabled(pio0, 0, true);
-    pio_sm_set_enabled(pio0, 1, true);
-    pio_sm_set_enabled(pio0, 2, true);
-    pio_sm_set_enabled(pio0, 3, true);
-    pio_sm_set_enabled(pio1, 3, true);
+    pio_sm_set_enabled(pio0, 0, true);  // set_pindir(low 4 bit)
+    pio_sm_set_enabled(pio0, 1, true);  // set_pindir(high 4 bit)
+    pio_sm_set_enabled(pio0, 2, true);  // data_out
+    pio_sm_set_enabled(pio0, 3, true);  // clockgen
+    // need starting clock before iorq_wait start
+    sleep_us(10);
+    pio_sm_set_enabled(pio1, 3, true);  // iorq_wait
     sleep_us(10);
     TOGGLE();
     TOGGLE();
@@ -323,19 +325,14 @@ loop:
         if ((port & (1<<RD_Pin)) == 0) {
             // IO Read cycle
             pio_sm_put(pio0, 2, c++);   // do something
-            sleep_ms(500);
+            //sleep_ms(500);
         } else {
             // IO Write cycle
             temp = ((port>>D0_Pin)&0xff);
-            //printf ("OUT: %02x\n", temp);
-            //sleep_us(1);
-
-            //sleep_ms(500);
-
         } 
         pio_sm_put(pio1, 3, 0); // notify IO process finished to the state machine
-        pio_sm_get(pio1, 3);    // wait for WAIT set High
-        while (((port = gpio_get_all()) & (1<<IORQ_Pin)) == 0);   // wait for cycle end
+        pio_sm_get_blocking(pio1, 3);    // wait for WAIT set High
+        //while (((port = gpio_get_all()) & (1<<IORQ_Pin)) == 0);   // wait for cycle end
                                 // wait for IORQ is High
         TOGGLE();
         goto loop;

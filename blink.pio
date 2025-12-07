@@ -81,7 +81,7 @@ void clockgen_program_init(PIO pio, uint sm, uint offset, uint pin, uint phase) 
     //  18.7 ... 4.0-4.17MHz (250-260ns) .... 0/1 wait in M1, 1 wait in WR, 0/1 wait in RD
     //  10.0 ... 7.1-7.6MHz (130-140ns) ... seems to work
     //   5.0 ... 14-16MHz (60-70ns) ... does not works
-    sm_config_set_clkdiv(&c, 19.0);
+    sm_config_set_clkdiv(&c, 18.0);
     pio_sm_init(pio, sm, offset, &c);
 }
 
