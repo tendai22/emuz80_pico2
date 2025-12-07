@@ -46,12 +46,13 @@
 ; PIO1:SM3: iorq_wait
 ;   SET: WAIT_Pin(31), count: 1
 .program iorq_wait
+    set pins, 1
 .wrap_target
-    wait 0 gpio 35     ; IORQ_Pin(35)
+    wait 0 gpio 24     ; IORQ_Pin(35)
     set pins, 0         ; WAIT_PIn(31) Low
     pull                ; wait for MainCPU work done
     set pins, 1         ; WAIT_Pin(31) High
-    wait 1 gpio 35     ; IORQ_Pin(35)
+    wait 1 gpio 24     ; IORQ_Pin(35)
     push
 .wrap
 
@@ -106,16 +107,19 @@ void data_out_program_init(PIO pio, uint sm, uint offset, uint d0_pin) {
     pio_sm_init(pio, sm, offset, &c);
 }
 
-void iorq_wait_program_init(PIO pio, uint sm, uint offset, uint iorq_pin, uint wait_pin) {
+void iorq_wait_program_init(PIO pio, uint sm, uint offset, uint wait_pin, uint d0_pin) {
 	//   IN: IORQ_Pin(35), count 1
 	//	 SET: WAIT_Pin(31), count: 1
-    pio_sm_set_consecutive_pindirs(pio, sm, iorq_pin, 1, false);
+    //pio_sm_set_consecutive_pindirs(pio, sm, iorq_pin, 1, false);
     pio_sm_set_consecutive_pindirs(pio, sm, wait_pin, 1, true);
     pio_sm_config c = iorq_wait_program_get_default_config(offset);
-    //sm_config_set_in_pins(&c, iorq_pin);
-    //sm_config_set_in_pin_count(&c, 1);
+    sm_config_set_in_pins(&c, d0_pin);
+    sm_config_set_in_pin_count(&c, 8);
+    sm_config_set_in_shift(&c, false, false, 8);
+    sm_config_set_out_pins(&c, d0_pin, 8);
+    sm_config_set_out_shift(&c, true, false, 8);
     sm_config_set_set_pins(&c, wait_pin, 1);
-    //sm_config_set_set_pin_count(&c, 1);
+    sm_config_set_set_pin_count(&c, 1);
     sm_config_set_clkdiv(&c, 1);         // 1 ... full speed 
     pio_sm_init(pio, sm, offset, &c);
 }

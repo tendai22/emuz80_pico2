@@ -11,14 +11,10 @@
 // before #include "blink.pio.h"
 //
 #define D0_Pin 16
-#define RD_Pin   32
-#define WR_Pin   33
-#define MREQ_Pin 34
-#define IORQ_Pin 35
-#define XRD_Pin 26
-#define XWR_Pin 30
-#define XMREQ_Pin 25
-#define XIORQ_Pin 24
+#define RD_Pin 26
+#define WR_Pin 30
+#define MREQ_Pin 25
+#define IORQ_Pin 24
 #define DEBUG_Pin 36
 #define WAIT_Pin 31
 #define RFSH_Pin 28
@@ -146,10 +142,10 @@ int main()
     gpio_init(RD_Pin);
     gpio_init(WR_Pin);
 
-    gpio_init(XMREQ_Pin);
-    gpio_init(XIORQ_Pin);
-    gpio_init(XRD_Pin);
-    gpio_init(XWR_Pin);
+    gpio_init(MREQ_Pin);
+    gpio_init(IORQ_Pin);
+    gpio_init(RD_Pin);
+    gpio_init(WR_Pin);
 
     // PIO Blinking example
     PIO pio_clock = pio0;
@@ -176,7 +172,7 @@ int main()
 	set_pindirs_program_init(pio0, 0, offset1, D0_Pin, RD_Pin);
 	set_pindirs_program_init(pio0, 1, offset1, D0_Pin + 4, RD_Pin);
 
-	// PIO1:SM0: data_out
+	// PIO0:SM2: data_out
 	//	 OUT: D0_Pin(16), count: 8
     offset1 = pio_add_program(pio0, &data_out_program);
     data_out_program_init(pio0, 2, offset1, D0_Pin);
@@ -188,25 +184,31 @@ int main()
     printf("clockgen: %d\n", offset1);
     clockgen_program_init(pio0, 3, offset1, CLK_Pin, 1);
 
-	// PIO1: pin assign
+    // PIO1: SM3 ... IO cycle WAIT handler
+    //   SET: BASE: 31(WAIT_Pin)
+    //   wait: 24(IORQ_Pin)
+    offset1 = pio_add_program(pio1, &iorq_wait_program);
+    iorq_wait_program_init(pio1, 3, offset1, WAIT_Pin, D0_Pin);
+    printf("iorq_wait = %d\n", offset1);
+
+    // PIO1: pin assign
 	// D0-D7
-	// RD,WR,MREQ,IORQ
+	// RD,WR,MREQ,IORQ,WAIT
 	//for (int i = 0; i < 8; ++i)
     //    pio_gpio_init(pio1, D0_Pin + i);
 	pio_gpio_init(pio1, RD_Pin);
 	pio_gpio_init(pio1, WR_Pin);
 	pio_gpio_init(pio1, MREQ_Pin);
 	pio_gpio_init(pio1, IORQ_Pin);
+	pio_gpio_init(pio1, WAIT_Pin);
 
 	// PIO1:SM3: iorq_wait
 	//   IN: IORQ_Pin, count 1
 	//	 SET: WAIT_Pin(31), count: 1
-    offset1 = pio_add_program(pio1, &iorq_wait_program);
-    iorq_wait_program_init(pio1, 3, offset1, D0_Pin, WAIT_Pin);
-    printf("iorq_wait = %d\n", offset1);
-	// For more pio examples see https://github.com/raspberrypi/pico-examples/tree/master/pio
-    //int n = 10;
-    //while (n-- > 0) TOGGLE();
+    TOGGLE();
+    sleep_us(1);
+    TOGGLE();
+
     TOGGLE();
     sleep_us(1);
     TOGGLE();
@@ -228,6 +230,9 @@ int main()
     }
     printf("\n");
 #endif
+    //
+    // Z80 test codes
+    // 
 #if 0
     // halt
     mem[2] = 0x76;
@@ -243,14 +248,14 @@ int main()
     mem[1] = 0x00;
     mem[2] = 0x00;
 #endif
-#if 1
+#if 0
     // INC (HL), JR 0xfc
     mem[0] = 0x21;  // LD HL, 7F00H
     mem[1] = 0x00;
     mem[2] = 0x7f;
     mem[3] = 0x34;  // INC (HL)
     mem[4] = 0x18;  // JR
-    mem[5] = 0xfd;  // -2
+    mem[5] = 0xfd;  // -3
 #endif
 #if 0
     // inc (hl) loop
@@ -262,9 +267,23 @@ int main()
     mem[5] = 0xfd;
     mem[6] = 0x0;
 #endif
+#if 0
+    // in 0h loop
+    mem[0] = 0xdb;  // IN 0H
+    mem[1] = 0x00;
+    mem[2] = 0x18;  // jr
+    mem[3] = 0xfc;  // -4 
+#endif
+#if 1
+    // out 0h loop
+    mem[0] = 0xd3;  // OUT 0H
+    mem[1] = 0x00;
+    mem[2] = 0x3c;  // INC A
+    mem[3] = 0x18;  // jr
+    mem[4] = 0xfb;  // -5 
+#endif
 
-    // start clock
-    // start clock
+    // start PIO state machines
     pio_sm_set_enabled(pio0, 0, true);
     pio_sm_set_enabled(pio0, 1, true);
     pio_sm_set_enabled(pio0, 2, true);
@@ -274,29 +293,50 @@ int main()
     TOGGLE();
     TOGGLE();
 
-    for (int i = 0; i < 10; ++i) {
-        TOGGLE();
-        sleep_us(1);
-        TOGGLE();
-        sleep_us(1);
-    }
-
     pio_sm_clear_fifos(pio0, 2);
+    // start Z80 CPU
     gpio_put(RESET_Pin, true);
-    //for (int i = 16; i < 24; ++i)
-    //    gpio_set_pulls(i, true, false);
 
+    // main loop
     register uint32_t port;
     int32_t count = 100;
-    register uint8_t c = 0;
+    register uint16_t c = 0;
     int32_t temp;
 loop:
-    while(((port = gpio_get_all()) & ((1<<XIORQ_Pin)|(1<<XWR_Pin))) == ((1<<XIORQ_Pin)|(1<<XWR_Pin))) {
+    while(((port = gpio_get_all()) & ((1<<IORQ_Pin)|(1<<WR_Pin))) == ((1<<IORQ_Pin)|(1<<WR_Pin))) {
+        // All other cycles, except neither IORQ nor WR.
+        // output mem[addr] asynchronously
+        //TOGGLE();
         pio_sm_put(pio0, 2, mem[port & 0xffff]);
+        //TOGGLE();
     }
-    if ((port & ((1<<XMREQ_Pin)|(1<<XWR_Pin))) == 0) {
+    if ((port & ((1<<MREQ_Pin)|(1<<WR_Pin))) == 0) {
+        // Memory Write Cycle
+        // store data to mem[addr], asynchronously
         TOGGLE();
         mem[port & 0xffff] = (port >> D0_Pin);
+        TOGGLE();
+        goto loop;
+    }
+    if ((port & (1<<IORQ_Pin)) == 0) {
+        TOGGLE();
+        if ((port & (1<<RD_Pin)) == 0) {
+            // IO Read cycle
+            pio_sm_put(pio0, 2, c++);   // do something
+            sleep_ms(500);
+        } else {
+            // IO Write cycle
+            temp = ((port>>D0_Pin)&0xff);
+            //printf ("OUT: %02x\n", temp);
+            //sleep_us(1);
+
+            //sleep_ms(500);
+
+        } 
+        pio_sm_put(pio1, 3, 0); // notify IO process finished to the state machine
+        pio_sm_get(pio1, 3);    // wait for WAIT set High
+        while (((port = gpio_get_all()) & (1<<IORQ_Pin)) == 0);   // wait for cycle end
+                                // wait for IORQ is High
         TOGGLE();
         goto loop;
     }
