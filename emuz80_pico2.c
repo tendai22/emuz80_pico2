@@ -71,24 +71,27 @@ void gpio_out_init(uint gpio, bool value) {
 
 uint8_t mem[65536];
 
-uint8_t prog1[] = {
-0x31, 0x00, 0x80,
-0x3A, 0x01, 0xE0,
-0xCB, 0x47,
-0x28, 0xF9,
-0x3A, 0x00, 0xE0,
-0xFE, 0x61,
-0x38, 0x06,
-0xFE, 0x7B,
-0x30, 0x02,
-0xE6, 0xDF,
-0xF5,
-0x3A, 0x01, 0xE0,
-0xCB, 0x4F,
-0x28, 0xF9,
-0xF1,
-0x32, 0x00, 0xE0,
-0x18, 0xDE,
+uint8_t uart_test[] = {
+0x31, 0x00, 0x80,   // LD SP, 0x8000
+//loop0:
+0xDB, 0x01,         // IN A, (0x1)
+0xCB, 0x47,         // BIT 0, A
+0x28, 0xF9,         // JR Z, loop0(0003H)
+0xDB, 0x00,         // LD A, (0x0)
+0xFE, 0x61,         // CP A, 'a'
+0x38, 0x06,         // JR C, label1
+0xFE, 0x7B,         // CP A, 'z'+1
+0x30, 0x02,         // JR NC, label1
+0xE6, 0xDF,         // AND A, DFH(clear Bit5)
+//label1:
+0xF5,               // PUSH AF
+//loop1:
+0xDB, 0x01,         // LD A, (0xE001)
+0xCB, 0x4F,         // BIT 1, A
+0x28, 0xFA,         // JR Z, loop1
+0xF1,               // POP AF
+0xD3, 0x00,   // OUT (0x0), A
+0x18, 0xE2,         // JR loop0
 };
 
 #define EMUBASIC 1
@@ -267,7 +270,7 @@ int main()
     mem[5] = 0xfd;
     mem[6] = 0x0;
 #endif
-#if 1
+#if 0
     // in 0h loop
     mem[0] = 0xdb;  // IN 0H
     mem[1] = 0x00;
@@ -281,6 +284,34 @@ int main()
     mem[2] = 0x3c;  // INC A
     mem[3] = 0x18;  // jr
     mem[4] = 0xfb;  // -5 
+#endif
+# if 0
+    // UART TEST (IO port version)
+    uint8_t mem0[] = {
+        0x31, 0x00, 0x80,
+        0xDB, 0x01,
+        0xCB, 0x4F,
+        0x28, 0xFA,
+        0x3E, 0x41,
+        0xD3, 0x00,
+        0x18, 0xF4,
+    };
+    for (int i = 0; i < sizeof mem0; ++i)
+        mem[i] = mem0[i];
+#endif
+#if 1
+    for (int i = 0; i < sizeof uart_test; ++i)
+        mem[i] = uart_test[i];
+
+#endif
+#if 0
+    uart_putc_raw(UART_ID, 'X');
+    while (uart_is_readable(UART_ID) == 0) {
+        while (uart_is_writable(UART_ID) == 0);
+        uart_putc_raw(UART_ID, 'A');
+        sleep_ms(500);
+    }
+    uart_putc_raw(UART_ID, 'Y');
 #endif
 
     // start PIO state machines
@@ -324,15 +355,39 @@ loop:
         TOGGLE();
         if ((port & (1<<RD_Pin)) == 0) {
             // IO Read cycle
-            pio_sm_put(pio0, 2, c++);   // do something
-            //sleep_ms(500);
-        } else {
+            // EMUZ80 UART emulation
+            uint16_t addr = port & 0xff;
+            // UARTCR or DR
+            if (addr == 1) {
+                uint8_t status = 0;
+                if (uart_is_readable(UART_ID))
+                    status |= (1<<0);
+                if (uart_is_writable(UART_ID))
+                    status |= (1<<1);
+                //printf("%c", '0'+status);
+                //sleep_ms(100);
+                pio_sm_put(pio0, 2, status);
+            } else if (addr == 0) {
+                uint8_t data = 0;
+                if (uart_is_readable(UART_ID))
+                    data = uart_getc(UART_ID);
+                pio_sm_put(pio0, 2, data);
+            }
+        } else if ((port & (1<<WR_Pin)) == 0) {
             // IO Write cycle
-            temp = ((port>>D0_Pin)&0xff);
+            uint16_t addr = port & 0xff;
+            uint8_t data = ((port>>D0_Pin)&0xff);
+            if (addr == 0) {
+                // UART DR
+                //printf("OUT: %02x\n", data);
+                //sleep_ms(100);
+                if (uart_is_writable(UART_ID))
+                    uart_putc_raw(UART_ID, data);
+            }
         } 
         pio_sm_put(pio1, 3, 0); // notify IO process finished to the state machine
-        pio_sm_get_blocking(pio1, 3);    // wait for WAIT set High
-        //while (((port = gpio_get_all()) & (1<<IORQ_Pin)) == 0);   // wait for cycle end
+        //pio_sm_get_blocking(pio1, 3);    // wait for WAIT set High
+        while (((port = gpio_get_all()) & (1<<IORQ_Pin)) == 0);   // wait for cycle end
                                 // wait for IORQ is High
         TOGGLE();
         goto loop;
