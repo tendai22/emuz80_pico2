@@ -94,8 +94,10 @@ uint8_t uart_test[] = {
 0x18, 0xE2,         // JR loop0
 };
 
-#define EMUBASIC 1
+#undef EMUBASIC
 #include "emuz80.h"
+#define EMUBASIC_IO
+#include "emubasic_io.h"
 
 int main()
 {
@@ -220,8 +222,13 @@ int main()
     for (int i = 0 ; i < sizeof mem; ++i)
         mem[i] = 0;
     // copy prog1
-    //memcpy(&mem[0], &emuz80_binary[0], sizeof emuz80_binary);
-	//memcpy(&mem[0], &prog1[0], sizeof prog1);
+#ifdef EMUBASIC_IO
+    memcpy(&mem[0], &emuz80_binary[0], sizeof emuz80_binary);
+#endif
+#ifdef EMUBASIC
+    memcpy(&mem[0], &emuz80_binary[0], sizeof emuz80_binary);
+#endif
+    //memcpy(&mem[0], &prog1[0], sizeof prog1);
     // debug Z80 codes
 #if 0
     for (int i = 0 ; i < sizeof emuz80_binary; ++i) {
@@ -299,7 +306,7 @@ int main()
     for (int i = 0; i < sizeof mem0; ++i)
         mem[i] = mem0[i];
 #endif
-#if 1
+#if 0
     for (int i = 0; i < sizeof uart_test; ++i)
         mem[i] = uart_test[i];
 
@@ -371,6 +378,7 @@ loop:
                 uint8_t data = 0;
                 if (uart_is_readable(UART_ID))
                     data = uart_getc(UART_ID);
+                //printf("[%02x]", data);
                 pio_sm_put(pio0, 2, data);
             }
         } else if ((port & (1<<WR_Pin)) == 0) {
@@ -381,12 +389,12 @@ loop:
                 // UART DR
                 //printf("OUT: %02x\n", data);
                 //sleep_ms(100);
-                if (uart_is_writable(UART_ID))
+                //if (uart_is_writable(UART_ID))
                     uart_putc_raw(UART_ID, data);
             }
-        } 
+        }
         pio_sm_put(pio1, 3, 0); // notify IO process finished to the state machine
-        //pio_sm_get_blocking(pio1, 3);    // wait for WAIT set High
+        pio_sm_get_blocking(pio1, 3);    // wait for WAIT set High
         while (((port = gpio_get_all()) & (1<<IORQ_Pin)) == 0);   // wait for cycle end
                                 // wait for IORQ is High
         TOGGLE();
