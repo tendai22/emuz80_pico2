@@ -47,15 +47,16 @@ pico_set_binary_type(emuz80_pico2 copy_to_ram)
 pico_generate_pio_header(emuz80_pico2 ${CMAKE_CURRENT_LIST_DIR}/blink.pio)
 
 # Modify the below lines to enable/disable output over UART/USB
-pico_enable_stdio_uart(emuz80_pico2 1)
-pico_enable_stdio_usb(emuz80_pico2 0)
+pico_enable_stdio_uart(emuz80_pico2 0)
+pico_enable_stdio_usb(emuz80_pico2 1)
 
 # compiler options
 target_compile_options(emuz80_pico2 PUBLIC -Ofast)
 
 # Add the standard library to the build
 target_link_libraries(emuz80_pico2
-        pico_stdlib)
+        pico_stdlib
+        pico_multicore)
 
 # Add the standard include files to the build
 target_include_directories(emuz80_pico2 PRIVATE

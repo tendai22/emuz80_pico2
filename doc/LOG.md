@@ -1318,3 +1318,14 @@ cycle_end:
 
 ## UART レジスタリード・ライト
 
+## 12/14: USB serial/two core version
+
+苦戦している。
+
+BASIC で時々、「打ってもいない 'F' が入る」があった。当初は USB serial(core0)側かと思ったが、
+Serial Echoback プログラムでも 'F' が入った。このプログラムで再現する現象を追った。
+
+in 01H で 4E を返す時がある。4Eなら下2ビットが意図通りなのでたまたま問題ないが。
+
+
+

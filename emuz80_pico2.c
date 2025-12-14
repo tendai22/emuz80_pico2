@@ -3,8 +3,10 @@
 #include "pico/stdlib.h"
 #include "hardware/pio.h"
 #include "hardware/uart.h"
+#include "pico/multicore.h"
 #include "hardware/gpio.h"
-
+#include "tusb.h"
+#include "pico/stdio_usb.h"
 //
 // Pin Definitions
 // This section should be located
@@ -25,6 +27,8 @@
 #define INT_Pin  41
 #define CLK_Pin  40
 #define TEST_Pin 45
+
+#define FLAG_VALUE 123
 
 #include "blink.pio.h"
 
@@ -55,11 +59,12 @@
 
 // Use pins 4 and 5 for UART1
 // Pins can be changed, see the GPIO function select table in the datasheet for information on GPIO assignments
-#define UART_TX_PIN 46 //0
-#define UART_RX_PIN 47 //1
+//#define UART_TX_PIN 46 //0
+//#define UART_RX_PIN 47 //1
 
 static int toggle_value = 1;
 #define TOGGLE() do {    gpio_xor_mask64(((uint64_t)1)<<TEST_Pin); } while(0)
+#define TOGGLE1() do {    gpio_xor_mask64(((uint64_t)1)<<TEST_Pin); sleep_us(1); } while(0)
 //#define TOGGLE() do {    (*(volatile uint32_t *)&(sio_hw->gpio_hi_togl)) = 1; } while(0)
 //#define TOGGLE() do { gpio_put(TEST_Pin, (toggle_value ^= 1));    } while(0)
 
@@ -84,44 +89,185 @@ uint8_t uart_test[] = {
 0x30, 0x02,         // JR NC, label1
 0xE6, 0xDF,         // AND A, DFH(clear Bit5)
 //label1:
-0xF5,               // PUSH AF
+0x47,               // MOV B,A
 //loop1:
 0xDB, 0x01,         // LD A, (0xE001)
 0xCB, 0x4F,         // BIT 1, A
 0x28, 0xFA,         // JR Z, loop1
-0xF1,               // POP AF
+0x78,               // MOV A,B
 0xD3, 0x00,   // OUT (0x0), A
 0x18, 0xE2,         // JR loop0
 };
+
+//
+// UART Status/Data registers
+//
+uint8_t uart_status = 0;
+uint8_t uart_data_tx = 0;
+uint8_t uart_data_rx = 0;
 
 #undef EMUBASIC
 #include "emuz80.h"
 #define EMUBASIC_IO
 #include "emubasic_io.h"
 
-int main()
+//
+// usb cdc printf
+//
+static int saved_char = PICO_ERROR_TIMEOUT;
+
+int kbhit(void)
 {
+    int c;
+    if (saved_char != PICO_ERROR_TIMEOUT) {
+        return 1;
+    }
+    TOGGLE();
+    saved_char = stdio_getchar_timeout_us(0);
+    TOGGLE();
+    if (saved_char == 'F') { TOGGLE1(); TOGGLE(); TOGGLE1(); TOGGLE();}
+    return saved_char != PICO_ERROR_TIMEOUT;
+}
+
+int getch(void)
+{
+    int c;
+    uint8_t data = 'Y';
+    if (kbhit()) {
+        data = saved_char;
+        saved_char = PICO_ERROR_TIMEOUT;
+        return data;
+    }
+    TOGGLE();
+    c = stdio_getchar();
+    if (c == 'F') { TOGGLE1(); TOGGLE(); }
+    TOGGLE();
+    TOGGLE();
+    TOGGLE();
+    if (c != PICO_ERROR_TIMEOUT) {
+        data = c;
+        saved_char = PICO_ERROR_TIMEOUT;
+        //sleep_us(1500);
+    } else {
+        data = 'O';
+    }
+    if (data == 'F') { TOGGLE1(); TOGGLE(); }
+    return data;
+}
+
+void putch(uint32_t c)
+{
+    TOGGLE();
+    putchar_raw(c);
+    TOGGLE();
+    //sleep_us(1500);
+}
+
+//
+// core0 のメインループ
+__attribute__((noinline)) void __time_critical_func(core0_entry)(void)
+{
+    // usb serial handling
+    int c;
+    uint32_t data;
+    uint32_t cmd;
+    while (1) {
+        cmd = multicore_fifo_pop_blocking();
+        if (cmd & 0x200) {
+            // status register read
+            data = 0;
+            if (kbhit())
+                data |= (1<<0);
+            if (tud_cdc_write_available() > 0)
+                data |= (1<<1);
+        } else if (cmd & 0x100) {
+            // data register read
+            data = getch();
+        } else {
+            // data register write
+            putch(cmd);
+            data = 'Y';
+        }
+        multicore_fifo_push_blocking(data);
+    }
+
+}
+
+// コア1のエントリポイント
+// core1_entry()はPIOの状態マシンを実行し、ROMデータを送信する  
+__attribute__((noinline)) void __time_critical_func(core1_entry)(void) {
+    // main loop
+    register uint32_t port;
+    int32_t count = 100;
+    uint16_t c = 0;
+    int32_t temp;
+    uint32_t status;
+    uint16_t addr;
+    uint8_t data;
+
+    multicore_fifo_push_blocking(FLAG_VALUE);
+    uint32_t g = multicore_fifo_pop_blocking();
+loop:
+    while(((port = gpio_get_all()) & ((1<<IORQ_Pin)|(1<<WR_Pin))) == ((1<<IORQ_Pin)|(1<<WR_Pin))) {
+        // All other cycles, except neither IORQ nor WR.
+        // output mem[addr] asynchronously
+        pio_sm_put(pio0, 2, mem[port & 0xffff]);
+    }
+    if ((port & ((1<<MREQ_Pin)|(1<<WR_Pin))) == 0) {
+        // Memory Write Cycle
+        // store data to mem[addr], asynchronously
+        mem[port & 0xffff] = (port >> D0_Pin);
+        goto loop;
+    }
+    port = gpio_get_all();      // re-read to confirm status lines
+    if ((port & (1<<IORQ_Pin)) == 0) {
+        if ((port & (1<<RD_Pin)) == 0) {
+            // IO Read cycle
+            // EMUZ80 UART emulation
+            addr = port & 0xff;
+            // UARTCR or DR
+            if (addr == 1) {
+                // read status register
+                multicore_fifo_push_blocking(0x200);    // read status cmd 0x200
+                status = multicore_fifo_pop_blocking();
+                pio_sm_put(pio0, 2, status);
+            } else if (addr == 0) {
+                uint8_t data = 0;
+                TOGGLE();
+                multicore_fifo_push_blocking(0x100);    // read rx data cmd 0x100
+                data = multicore_fifo_pop_blocking();
+                if (data == 'F') { TOGGLE1(); TOGGLE1(); }
+
+                pio_sm_put(pio0, 2, data);
+                TOGGLE();
+
+            }
+        } else if ((port & (1<<WR_Pin)) == 0) {
+            // IO Write cycle
+            addr = port & 0xff;
+            data = ((port>>D0_Pin)&0xff);
+            if (addr == 0) {
+                // UART DR
+                multicore_fifo_push_blocking(data & 0xff);     // write tx data cmd 0-0xff
+                multicore_fifo_pop_blocking();
+            }
+        }
+        pio_sm_put(pio1, 3, 0); // notify IO process finished to the state machine
+        pio_sm_get_blocking(pio1, 3);    // wait for WAIT set High
+        while (((port = gpio_get_all()) & (1<<IORQ_Pin)) == 0);   // wait for cycle end
+                                // wait for IORQ is High
+        goto loop;
+    }
+    goto loop;
+}
+
+
+__attribute__((noinline)) int __time_critical_func(main)(void) 
+{
+
     stdio_init_all();
-
-    // Set up our UART
-    uart_init(UART_ID, BAUD_RATE);
-    // Set the TX and RX pins by using the function select on the GPIO
-    // Set datasheet for more information on function select
-    gpio_set_function(UART_TX_PIN, UART_FUNCSEL_NUM(UART_ID, UART_TX_PIN));
-    gpio_set_function(UART_RX_PIN, UART_FUNCSEL_NUM(UART_ID, UART_RX_PIN));
-    
-    // Use some the various UART functions to send out data
-    // In a default system, printf will also output via the default UART
-    
-    // Send out a string, with CR/LF conversions
-    //uart_puts(UART_ID, " Hello, UART!\r\n");
-    //printf("PICO_USE_GPIO_COPROCESSOR = %d, PICO_PIO_USE_GPIO_BASE = %d\n", PICO_USE_GPIO_COPROCESSOR, PICO_PIO_USE_GPIO_BASE);
-    
-    // For more examples of UART use see https://github.com/raspberrypi/pico-examples/tree/master/uart
-
-    // TEST pin
-    //gpio_set_dir_out_masked64(((uint64_t)1)<in);
-    //gpio_put_masked64(((uint64_t)1)<<TEST_Pin, 0);
+    setbuf(stdout, NULL);
+    sleep_ms(1000);     // needed for starting USB printf
 
     // Z80 Input pin initialize
 
@@ -132,9 +278,6 @@ int main()
     gpio_out_init(INT_Pin, false);      // INT Pin has an inverter, so negate signal is needed
 
     gpio_out_init(TEST_Pin, false);
-    TOGGLE();
-    TOGGLE();
-    //TOGGLE();
 
     // GPIO In
     // MREQ, IORQ, RD, RFSH, M1 are covered by PIO
@@ -161,6 +304,7 @@ int main()
     pio_set_gpio_base(pio1, 16);
     // pio_set_gpio_base should be invoked before pio_add_program
     uint offset1;
+
 
 	// data bus
 
@@ -210,13 +354,13 @@ int main()
 	// PIO1:SM3: iorq_wait
 	//   IN: IORQ_Pin, count 1
 	//	 SET: WAIT_Pin(31), count: 1
-    TOGGLE();
-    sleep_us(1);
-    TOGGLE();
+    //TOGGLE();
+    //sleep_us(1);
+    //TOGGLE();
 
-    TOGGLE();
-    sleep_us(1);
-    TOGGLE();
+    //TOGGLE();
+    //sleep_us(1);
+    //TOGGLE();
 
     // mem clear
     for (int i = 0 ; i < sizeof mem; ++i)
@@ -228,8 +372,10 @@ int main()
 #ifdef EMUBASIC
     memcpy(&mem[0], &emuz80_binary[0], sizeof emuz80_binary);
 #endif
-    //memcpy(&mem[0], &prog1[0], sizeof prog1);
+
+    //
     // debug Z80 codes
+    //
 #if 0
     for (int i = 0 ; i < sizeof emuz80_binary; ++i) {
         if (i % 8 == 0)
@@ -303,10 +449,14 @@ int main()
         0xD3, 0x00,
         0x18, 0xF4,
     };
-    for (int i = 0; i < sizeof mem0; ++i)
+    for (int i = 0; i < sizeof mem0; ++i) {
         mem[i] = mem0[i];
+        printf("%02x ", mem[i]);
+    }
+    printf("\n");
 #endif
 #if 0
+    // UART R/W test
     for (int i = 0; i < sizeof uart_test; ++i)
         mem[i] = uart_test[i];
 
@@ -330,131 +480,28 @@ int main()
     sleep_us(10);
     pio_sm_set_enabled(pio1, 3, true);  // iorq_wait
     sleep_us(10);
-    TOGGLE();
-    TOGGLE();
-
     pio_sm_clear_fifos(pio0, 2);
-    // start Z80 CPU
-    gpio_put(RESET_Pin, true);
 
-    // main loop
-    register uint32_t port;
-    int32_t count = 100;
-    register uint16_t c = 0;
-    int32_t temp;
-loop:
-    while(((port = gpio_get_all()) & ((1<<IORQ_Pin)|(1<<WR_Pin))) == ((1<<IORQ_Pin)|(1<<WR_Pin))) {
-        // All other cycles, except neither IORQ nor WR.
-        // output mem[addr] asynchronously
-        //TOGGLE();
-        pio_sm_put(pio0, 2, mem[port & 0xffff]);
-        //TOGGLE();
-    }
-    if ((port & ((1<<MREQ_Pin)|(1<<WR_Pin))) == 0) {
-        // Memory Write Cycle
-        // store data to mem[addr], asynchronously
-        TOGGLE();
-        mem[port & 0xffff] = (port >> D0_Pin);
-        TOGGLE();
-        goto loop;
-    }
-    if ((port & (1<<IORQ_Pin)) == 0) {
-        TOGGLE();
-        if ((port & (1<<RD_Pin)) == 0) {
-            // IO Read cycle
-            // EMUZ80 UART emulation
-            uint16_t addr = port & 0xff;
-            // UARTCR or DR
-            if (addr == 1) {
-                uint8_t status = 0;
-                if (uart_is_readable(UART_ID))
-                    status |= (1<<0);
-                if (uart_is_writable(UART_ID))
-                    status |= (1<<1);
-                //printf("%c", '0'+status);
-                //sleep_ms(100);
-                pio_sm_put(pio0, 2, status);
-            } else if (addr == 0) {
-                uint8_t data = 0;
-                if (uart_is_readable(UART_ID))
-                    data = uart_getc(UART_ID);
-                //printf("[%02x]", data);
-                pio_sm_put(pio0, 2, data);
-            }
-        } else if ((port & (1<<WR_Pin)) == 0) {
-            // IO Write cycle
-            uint16_t addr = port & 0xff;
-            uint8_t data = ((port>>D0_Pin)&0xff);
-            if (addr == 0) {
-                // UART DR
-                //printf("OUT: %02x\n", data);
-                //sleep_ms(100);
-                //if (uart_is_writable(UART_ID))
-                    uart_putc_raw(UART_ID, data);
-            }
-        }
-        pio_sm_put(pio1, 3, 0); // notify IO process finished to the state machine
-        pio_sm_get_blocking(pio1, 3);    // wait for WAIT set High
-        while (((port = gpio_get_all()) & (1<<IORQ_Pin)) == 0);   // wait for cycle end
-                                // wait for IORQ is High
-        TOGGLE();
-        goto loop;
-    }
-    goto loop;
     //
+    // core1 (bus read/write loop)
     //
-    //
-    //
-#if 0  
-    while(true) {
-        if (pio_sm_is_rx_fifo_empty(pio_wait, 2) == 0) {
-            data = pio_sm_get_blocking(pio_wait, 2);    // wait for access event occurs
-            status = (gpio_get_all() >> 24) & 0xf;  // IORQ,MREQ,RD,M1
-            if ((status & 0x4) == 0) {     // Z80 Read
-                // Z80 Read mode: RD_Pin Low
-                TOGGLE();
-                addr = (gpio_get_all() & 0xffff);
-                data = mem[addr];
-                if ((addr & 0xfffe) == 0xe000) {
-                    // UARTCR or DR
-                    if (addr == 0xe001) {
-                        uint8_t status = 0;
-                        if (uart_is_readable(UART_ID))
-                            status |= (1<<0);
-                        if (uart_is_writable(UART_ID))
-                            status |= (1<<1);
-                        data = status;
-                    } else if (addr == 0xe000) {
-                        data = 0;
-                        if (uart_is_readable(UART_ID))
-                            data = uart_getc(UART_ID);
-                    }
-                }
-                //if (count-- > 0) printf("%04X: %02X RD\r\n", addr, data);
-                //if (addr == 0xe000) printf("%04X: %02X RD\r\n", addr, data);
-                pio_sm_put(pio_wait, 2, data);
-                //pio_sm_put(pio_wait, 2, 0);
-                TOGGLE();
-            } else {
-                // Z80 Write mode: RD_Pin High
-                TOGGLE();
-                addr = gpio_get_all() & 0xffff;     // A0-A15 ... GPIO0-15
-                data = (gpio_get_all() & 0xff0000) >> 16;
-                if ((addr & 0xfffe) != 0xe000) 
-                    mem[addr] = data;
-                else {
-                    // UART DR
-                    if (addr == 0xe000) {
-                        if (uart_is_writable(UART_ID))
-                            uart_putc_raw(UART_ID, data);
-                    }
-                }
-                //if (count-- > 0) printf("%04X: %02X WR\r\n", addr, data);
-                //sleep_ms(500);
-                pio_sm_put(pio_wait, 2, 21);   // notify end of process
-                TOGGLE();
-            }
-        }
+    multicore_launch_core1(core1_entry);
+    uint32_t g = multicore_fifo_pop_blocking();
+    if (g != FLAG_VALUE) {
+        printf("core1 start failure, stopping\n");
+        while(1);
+    } else {
+        printf("core1 start, push core0 status!\n");
     }
-#endif
+
+    multicore_fifo_push_blocking(FLAG_VALUE);   // start core1
+    sleep_us(2);
+
+    // start Z80 CPU
+
+    gpio_put(RESET_Pin, true);
+    printf("reset High, start\n");
+
+    core0_entry();
+    // NOT REACHED
 }
