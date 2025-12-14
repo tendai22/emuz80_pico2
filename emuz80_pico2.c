@@ -17,14 +17,14 @@
 #define WR_Pin 30
 #define MREQ_Pin 25
 #define IORQ_Pin 24
-#define DEBUG_Pin 36
+//#define DEBUG_Pin 36
 #define WAIT_Pin 31
-#define RFSH_Pin 28
-#define M1_Pin   27
+//#define RFSH_Pin 28
+//#define M1_Pin   27
 #define RESET_Pin 42
-#define BUSAK_Pin 29
-#define BUSRQ_Pin 43
-#define INT_Pin  41
+//#define BUSAK_Pin 29
+//#define BUSRQ_Pin 43
+//#define INT_Pin  41
 #define CLK_Pin  40
 #define TEST_Pin 45
 
@@ -171,7 +171,7 @@ loop:
         // output mem[addr] asynchronously
         pio_sm_put(pio0, 2, mem[port & 0xffff]);
     }
-    if ((port & ((1<<MREQ_Pin)|(1<<WR_Pin))) == 0) {
+    if ((port & ((1<<IORQ_Pin)|(1<<WR_Pin))) == (1<<IORQ_Pin)) {
         // Memory Write Cycle
         // store data to mem[addr], asynchronously
         mem[port & 0xffff] = (port >> D0_Pin);
@@ -227,8 +227,8 @@ __attribute__((noinline)) int __time_critical_func(main)(void)
     // GPIO Out
     gpio_out_init(WAIT_Pin, true);
     gpio_out_init(RESET_Pin, false);
-    gpio_out_init(BUSRQ_Pin, true);
-    gpio_out_init(INT_Pin, false);      // INT Pin has an inverter, so negate signal is needed
+    //gpio_out_init(BUSRQ_Pin, true);
+    //gpio_out_init(INT_Pin, false);      // INT Pin has an inverter, so negate signal is needed
 
     gpio_out_init(TEST_Pin, false);
 
@@ -236,15 +236,10 @@ __attribute__((noinline)) int __time_critical_func(main)(void)
     // MREQ, IORQ, RD, RFSH, M1 are covered by PIO
     //
     gpio_init_mask(0xffff);     // A0-A15 input 
-    gpio_init(BUSAK_Pin);
+    //gpio_init(BUSAK_Pin);
     gpio_init(MREQ_Pin);
     gpio_init(IORQ_Pin);
-    gpio_init(RFSH_Pin);
-    gpio_init(RD_Pin);
-    gpio_init(WR_Pin);
-
-    gpio_init(MREQ_Pin);
-    gpio_init(IORQ_Pin);
+    //gpio_init(RFSH_Pin);
     gpio_init(RD_Pin);
     gpio_init(WR_Pin);
 
