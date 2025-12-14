@@ -32,36 +32,6 @@
 
 #include "blink.pio.h"
 
-//void clockgen_pin_forever(PIO pio, uint sm, uint offset, uint pin, uint phase) {
-//    clockgen_program_init(pio, sm, offset, pin, phase);
-//}
-
-//void wait_mreq_forever(PIO pio, uint sm, uint offset, uint rfsh_pin) {
-//    wait_mreq_program_init(pio, sm, offset, rfsh_pin);
-//}
-
-//void wait_iorq_forever(PIO pio, uint sm, uint offset, uint pin) {
-//    wait_iorq_program_init(pio, sm, offset, pin);
-//}
-
-//void wait_access_forever(PIO pio, uint sm, uint offset) {
-//    wait_access_program_init(pio, sm, offset);
-//}
-
-//void databus_forever(PIO pio, uint sm, uint offset, uint wait_pin) {
-//    databus_program_init(pio, sm, offset, wait_pin);
-//}
-
-// UART defines
-// By default the stdout UART is `uart0`, so we will use the second one
-#define UART_ID uart0
-#define BAUD_RATE 115200
-
-// Use pins 4 and 5 for UART1
-// Pins can be changed, see the GPIO function select table in the datasheet for information on GPIO assignments
-//#define UART_TX_PIN 46 //0
-//#define UART_RX_PIN 47 //1
-
 static int toggle_value = 1;
 #define TOGGLE() do {    gpio_xor_mask64(((uint64_t)1)<<TEST_Pin); } while(0)
 #define TOGGLE1() do {    gpio_xor_mask64(((uint64_t)1)<<TEST_Pin); sleep_us(1); } while(0)
@@ -112,7 +82,7 @@ uint8_t uart_data_rx = 0;
 #include "emubasic_io.h"
 
 //
-// usb cdc printf
+// usb cdc putchar/getchar
 //
 static int saved_char = PICO_ERROR_TIMEOUT;
 
@@ -122,10 +92,7 @@ int kbhit(void)
     if (saved_char != PICO_ERROR_TIMEOUT) {
         return 1;
     }
-    TOGGLE();
     saved_char = stdio_getchar_timeout_us(0);
-    TOGGLE();
-    if (saved_char == 'F') { TOGGLE1(); TOGGLE(); TOGGLE1(); TOGGLE();}
     return saved_char != PICO_ERROR_TIMEOUT;
 }
 
@@ -138,33 +105,24 @@ int getch(void)
         saved_char = PICO_ERROR_TIMEOUT;
         return data;
     }
-    TOGGLE();
     c = stdio_getchar();
-    if (c == 'F') { TOGGLE1(); TOGGLE(); }
-    TOGGLE();
-    TOGGLE();
-    TOGGLE();
     if (c != PICO_ERROR_TIMEOUT) {
         data = c;
         saved_char = PICO_ERROR_TIMEOUT;
-        //sleep_us(1500);
     } else {
         data = 'O';
     }
-    if (data == 'F') { TOGGLE1(); TOGGLE(); }
     return data;
 }
 
 void putch(uint32_t c)
 {
-    TOGGLE();
     putchar_raw(c);
-    TOGGLE();
-    //sleep_us(1500);
 }
 
 //
 // core0 のメインループ
+// この関数からリターンしない。
 __attribute__((noinline)) void __time_critical_func(core0_entry)(void)
 {
     // usb serial handling
@@ -233,14 +191,9 @@ loop:
                 pio_sm_put(pio0, 2, status);
             } else if (addr == 0) {
                 uint8_t data = 0;
-                TOGGLE();
                 multicore_fifo_push_blocking(0x100);    // read rx data cmd 0x100
                 data = multicore_fifo_pop_blocking();
-                if (data == 'F') { TOGGLE1(); TOGGLE1(); }
-
                 pio_sm_put(pio0, 2, data);
-                TOGGLE();
-
             }
         } else if ((port & (1<<WR_Pin)) == 0) {
             // IO Write cycle
@@ -300,9 +253,7 @@ __attribute__((noinline)) int __time_critical_func(main)(void)
     PIO pio_wait = pio1;
     //uint sm_clock = 0;
 
-    pio_set_gpio_base(pio0, 16);
-    pio_set_gpio_base(pio1, 16);
-    // pio_set_gpio_base should be invoked before pio_add_program
+
     uint offset1;
 
 
@@ -310,9 +261,15 @@ __attribute__((noinline)) int __time_critical_func(main)(void)
 
 	for (int i = 0; i < 8; ++i)
         pio_gpio_init(pio0, D0_Pin + i);
-	pio_gpio_init(pio0, RD_Pin);
 
-	// PIO0:SM0,1
+    //
+    // PIO StateMachine(SM) initialzation
+    //
+    // pio_set_gpio_base should be invoked before pio_add_program
+    pio_set_gpio_base(pio0, 16);
+    pio_set_gpio_base(pio1, 16);
+    //
+    // PIO0:SM0,1
 	//   in: RD_Pin(32), count: 1
 	//   sideset: D0_Pin(16),D4_Pin(20), count: 4
     printf("---start---\n");
@@ -341,26 +298,12 @@ __attribute__((noinline)) int __time_critical_func(main)(void)
     printf("iorq_wait = %d\n", offset1);
 
     // PIO1: pin assign
-	// D0-D7
 	// RD,WR,MREQ,IORQ,WAIT
-	//for (int i = 0; i < 8; ++i)
-    //    pio_gpio_init(pio1, D0_Pin + i);
 	pio_gpio_init(pio1, RD_Pin);
 	pio_gpio_init(pio1, WR_Pin);
 	pio_gpio_init(pio1, MREQ_Pin);
 	pio_gpio_init(pio1, IORQ_Pin);
 	pio_gpio_init(pio1, WAIT_Pin);
-
-	// PIO1:SM3: iorq_wait
-	//   IN: IORQ_Pin, count 1
-	//	 SET: WAIT_Pin(31), count: 1
-    //TOGGLE();
-    //sleep_us(1);
-    //TOGGLE();
-
-    //TOGGLE();
-    //sleep_us(1);
-    //TOGGLE();
 
     // mem clear
     for (int i = 0 ; i < sizeof mem; ++i)
