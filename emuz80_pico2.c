@@ -14,23 +14,17 @@
 //
 
 //
-// AE_RP2040 board
+// Pico2 A0-A10(2k) board
 //
-#define D0_Pin 16
-#define RD_Pin 15
-#define WR_Pin 24
-//#define MREQ_Pin 25
-#define IORQ_Pin 25
-//#define DEBUG_Pin 36
-#define WAIT_Pin 26
-//#define RFSH_Pin 28
-//#define M1_Pin   27
-#define RESET_Pin 27
-//#define BUSAK_Pin 29
-//#define BUSRQ_Pin 43
-//#define INT_Pin  41
-#define CLK_Pin  28
-#define TEST_Pin 29
+#define D0_Pin 11
+#define ADDR_MASK 0x7ff
+#define RD_Pin 19
+#define WR_Pin 20
+#define IORQ_Pin 21
+#define WAIT_Pin 22
+#define RESET_Pin 26
+#define CLK_Pin  27
+#define TEST_Pin 28
 
 #define FLAG_VALUE 123
 
@@ -170,23 +164,19 @@ __attribute__((noinline)) void __time_critical_func(core1_entry)(void) {
     multicore_fifo_push_blocking(FLAG_VALUE);
     uint32_t g = multicore_fifo_pop_blocking();
 loop:
-    //while(((port = gpio_get_all()) & ((1<<IORQ_Pin)|(1<<WR_Pin))) == ((1<<IORQ_Pin)|(1<<WR_Pin))) {
-    while (1) {
-        if (((port = gpio_get_all()) & (1<<RD_Pin)) == 0) {
+    while(((port = gpio_get_all()) & ((1<<IORQ_Pin)|(1<<WR_Pin))) == ((1<<IORQ_Pin)|(1<<WR_Pin))) {
         // All other cycles, except neither IORQ nor WR.
         // output mem[addr] asynchronously
-            TOGGLE();
-            pio_sm_put(pio0, 2, mem[port & 0x7fff]);
-            TOGGLE();
-        }
-        goto loop;
+        //TOGGLE();
+        pio_sm_put(pio0, 2, mem[port & ADDR_MASK]);
+        //TOGGLE();
     }
     if ((port & ((1<<IORQ_Pin)|(1<<WR_Pin))) == (1<<IORQ_Pin)) {
         // Memory Write Cycle
         // store data to mem[addr], asynchronously
-        //TOGGLE();
-        mem[port & 0x3fff] = (port >> D0_Pin);
-        //TOGGLE();
+        TOGGLE();
+        mem[port & ADDR_MASK] = (port >> D0_Pin) & 0xff;
+        TOGGLE();
         goto loop;
     }
     port = gpio_get_all();      // re-read to confirm status lines
@@ -316,7 +306,7 @@ __attribute__((noinline)) int __time_critical_func(main)(void)
         mem[i] = 0;
     // copy prog1
 #ifdef EMUBASIC_IO
-    memcpy(&mem[0], &emuz80_binary[0], sizeof emuz80_binary);
+    //memcpy(&mem[0], &emuz80_binary[0], sizeof emuz80_binary);
 #endif
 #ifdef EMUBASIC
     memcpy(&mem[0], &emuz80_binary[0], sizeof emuz80_binary);
@@ -338,17 +328,14 @@ __attribute__((noinline)) int __time_critical_func(main)(void)
     //
     // Z80 test codes
     // 
-#if 1
+#if 0
     // halt
     mem[1] = 0x76;
 #endif
-#if 1
+#if 0
     mem[0] = 0xc3;
     mem[1] = 0x00;
     mem[2] = 0x00;
-    mem[0x78] = 0xc3;
-    mem[0x79] = 0x00;
-    mem[0x7a] = 0x00;
 #endif
 #if 0
     // jr loop
@@ -419,7 +406,7 @@ __attribute__((noinline)) int __time_critical_func(main)(void)
     }
     printf("\n");
 #endif
-#if 0
+#if 1
     // UART R/W test
     for (int i = 0; i < sizeof uart_test; ++i)
         mem[i] = uart_test[i];
