@@ -8,7 +8,7 @@
 
 ;
 ; PIO0:SM0,1 ... set_pindirs
-;   in: RD_Pin(32), count: 1
+;   in: RD_Pin(15), count: 1
 ;   sideset: D0_Pin(16),D4_Pin(20), count: 4
 .program set_pindirs
 .origin 0
@@ -27,15 +27,12 @@
 ;
 ; PIO0:SM3 ... two/one phase clock generator(program clockgen)
 ;
-; SET: BASE: 40(CLK_Pin, inverted), 41(INT_Pin, inverted)
+; SET: BASE: 28(CLK_Pin)
 .program clockgen
 .wrap_target
     ; outputs are inverted, so 0 means High, 1 means Low
     set pins, 1  ; Turn LED on
     set pins, 0  ; Turn LED off
-; revive the following two lines if 2-phase clock feature we use
-    ;set pins, 2
-    ;set pins, 3
 .wrap             ; Blink forever!
 
 ;
@@ -44,15 +41,15 @@
 
 ;
 ; PIO1:SM3: iorq_wait
-;   SET: WAIT_Pin(31), count: 1
+;   SET: WAIT_Pin(26), count: 1
 .program iorq_wait
     set pins, 1
 .wrap_target
-    wait 0 gpio 24     ; IORQ_Pin(35)
-    set pins, 0         ; WAIT_PIn(31) Low
+    wait 0 gpio 25     ; IORQ_Pin(25)
+    set pins, 0         ; WAIT_PIn(26) Low
     pull                ; wait for MainCPU work done
-    set pins, 1         ; WAIT_Pin(31) High
-    wait 1 gpio 24     ; IORQ_Pin(35)
+    set pins, 1         ; WAIT_Pin(26) High
+    wait 1 gpio 25     ; IORQ_Pin(25)
     push
 .wrap
 
@@ -64,6 +61,7 @@
 
 void clockgen_program_init(PIO pio, uint sm, uint offset, uint pin, uint phase) {
 
+    //printf("pindirs: clk=%d\n", pin);
     pio_gpio_init(pio, pin);
     if (phase == 2)
         pio_gpio_init(pio, pin + 1);
@@ -86,8 +84,9 @@ void clockgen_program_init(PIO pio, uint sm, uint offset, uint pin, uint phase) 
 }
 
 void set_pindirs_program_init(PIO pio, uint sm, uint offset, uint data_pin, uint rd_pin) {
-	//   in: RD_Pin(32), count: 1
+	//   in: RD_Pin(15), count: 1
 	//   sideset: D0_Pin(16),D4_Pin(20), count: 4
+    //printf("pindirs: d0=%d, rd=%d\n", data_pin, rd_pin);
     pio_sm_set_consecutive_pindirs(pio, sm, rd_pin, 1, false);
     pio_sm_config c = set_pindirs_program_get_default_config(offset);
     sm_config_set_in_pins(&c, rd_pin);
@@ -99,6 +98,7 @@ void set_pindirs_program_init(PIO pio, uint sm, uint offset, uint data_pin, uint
 
 void data_out_program_init(PIO pio, uint sm, uint offset, uint d0_pin) {
 	//	 OUT: D0_Pin(16), count: 8
+    //printf("data_out: d0=%d\n", d0_pin);
     pio_sm_set_consecutive_pindirs(pio, sm, d0_pin, 8, true);
     pio_sm_config c = data_out_program_get_default_config(offset);
     sm_config_set_out_pins(&c, d0_pin, 8);
@@ -108,8 +108,9 @@ void data_out_program_init(PIO pio, uint sm, uint offset, uint d0_pin) {
 }
 
 void iorq_wait_program_init(PIO pio, uint sm, uint offset, uint wait_pin, uint d0_pin) {
-	//   IN: IORQ_Pin(35), count 1
-	//	 SET: WAIT_Pin(31), count: 1
+	//   IN/OUT: D0_Pin(16), count 8
+	//	 SET: WAIT_Pin(26), count: 1
+    //printf("iorq_wait: wait=%d, d0=%d\n", wait_pin, d0_pin);
     //pio_sm_set_consecutive_pindirs(pio, sm, iorq_pin, 1, false);
     pio_sm_set_consecutive_pindirs(pio, sm, wait_pin, 1, true);
     pio_sm_config c = iorq_wait_program_get_default_config(offset);

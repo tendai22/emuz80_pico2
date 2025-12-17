@@ -12,21 +12,25 @@
 // This section should be located
 // before #include "blink.pio.h"
 //
+
+//
+// AE_RP2040 board
+//
 #define D0_Pin 16
-#define RD_Pin 26
-#define WR_Pin 30
-#define MREQ_Pin 25
-#define IORQ_Pin 24
+#define RD_Pin 15
+#define WR_Pin 24
+//#define MREQ_Pin 25
+#define IORQ_Pin 25
 //#define DEBUG_Pin 36
-#define WAIT_Pin 31
+#define WAIT_Pin 26
 //#define RFSH_Pin 28
 //#define M1_Pin   27
-#define RESET_Pin 42
+#define RESET_Pin 27
 //#define BUSAK_Pin 29
 //#define BUSRQ_Pin 43
 //#define INT_Pin  41
-#define CLK_Pin  40
-#define TEST_Pin 45
+#define CLK_Pin  28
+#define TEST_Pin 29
 
 #define FLAG_VALUE 123
 
@@ -166,15 +170,23 @@ __attribute__((noinline)) void __time_critical_func(core1_entry)(void) {
     multicore_fifo_push_blocking(FLAG_VALUE);
     uint32_t g = multicore_fifo_pop_blocking();
 loop:
-    while(((port = gpio_get_all()) & ((1<<IORQ_Pin)|(1<<WR_Pin))) == ((1<<IORQ_Pin)|(1<<WR_Pin))) {
+    //while(((port = gpio_get_all()) & ((1<<IORQ_Pin)|(1<<WR_Pin))) == ((1<<IORQ_Pin)|(1<<WR_Pin))) {
+    while (1) {
+        if (((port = gpio_get_all()) & (1<<RD_Pin)) == 0) {
         // All other cycles, except neither IORQ nor WR.
         // output mem[addr] asynchronously
-        pio_sm_put(pio0, 2, mem[port & 0xffff]);
+            TOGGLE();
+            pio_sm_put(pio0, 2, mem[port & 0x7fff]);
+            TOGGLE();
+        }
+        goto loop;
     }
     if ((port & ((1<<IORQ_Pin)|(1<<WR_Pin))) == (1<<IORQ_Pin)) {
         // Memory Write Cycle
         // store data to mem[addr], asynchronously
-        mem[port & 0xffff] = (port >> D0_Pin);
+        //TOGGLE();
+        mem[port & 0x3fff] = (port >> D0_Pin);
+        //TOGGLE();
         goto loop;
     }
     port = gpio_get_all();      // re-read to confirm status lines
@@ -217,10 +229,10 @@ loop:
 
 __attribute__((noinline)) int __time_critical_func(main)(void) 
 {
-
     stdio_init_all();
     setbuf(stdout, NULL);
-    sleep_ms(1000);     // needed for starting USB printf
+    sleep_ms(300);     // needed for starting USB printf
+    printf("---start---\n");
 
     // Z80 Input pin initialize
 
@@ -235,9 +247,9 @@ __attribute__((noinline)) int __time_critical_func(main)(void)
     // GPIO In
     // MREQ, IORQ, RD, RFSH, M1 are covered by PIO
     //
-    gpio_init_mask(0xffff);     // A0-A15 input 
+    gpio_init_mask(0x7fff);     // A0-A15 input 
     //gpio_init(BUSAK_Pin);
-    gpio_init(MREQ_Pin);
+    //gpio_init(MREQ_Pin);
     gpio_init(IORQ_Pin);
     //gpio_init(RFSH_Pin);
     gpio_init(RD_Pin);
@@ -261,15 +273,14 @@ __attribute__((noinline)) int __time_critical_func(main)(void)
     // PIO StateMachine(SM) initialzation
     //
     // pio_set_gpio_base should be invoked before pio_add_program
-    pio_set_gpio_base(pio0, 16);
-    pio_set_gpio_base(pio1, 16);
+    //pio_set_gpio_base(pio0, 16);
+    //pio_set_gpio_base(pio1, 16);
     //
     // PIO0:SM0,1
 	//   in: RD_Pin(32), count: 1
 	//   sideset: D0_Pin(16),D4_Pin(20), count: 4
-    printf("---start---\n");
 	offset1 = pio_add_program(pio0, &set_pindirs_program);
-    printf("set_pindir: %d\n", offset1);
+    //printf("set_pindir: %d\n", offset1);
 	set_pindirs_program_init(pio0, 0, offset1, D0_Pin, RD_Pin);
 	set_pindirs_program_init(pio0, 1, offset1, D0_Pin + 4, RD_Pin);
 
@@ -277,12 +288,12 @@ __attribute__((noinline)) int __time_critical_func(main)(void)
 	//	 OUT: D0_Pin(16), count: 8
     offset1 = pio_add_program(pio0, &data_out_program);
     data_out_program_init(pio0, 2, offset1, D0_Pin);
-    printf("data_out = %d\n", offset1);
+    //printf("data_out = %d\n", offset1);
 
     // PIO0:SM3 ... two/one phase clock generator(program clockgen)
 	// 	 SET: BASE: 40(CLK_Pin, inverted), 41(INT_Pin, inverted)
     offset1 = pio_add_program(pio0, &clockgen_program);
-    printf("clockgen: %d\n", offset1);
+    //printf("clockgen: %d\n", offset1);
     clockgen_program_init(pio0, 3, offset1, CLK_Pin, 1);
 
     // PIO1: SM3 ... IO cycle WAIT handler
@@ -290,13 +301,13 @@ __attribute__((noinline)) int __time_critical_func(main)(void)
     //   wait: 24(IORQ_Pin)
     offset1 = pio_add_program(pio1, &iorq_wait_program);
     iorq_wait_program_init(pio1, 3, offset1, WAIT_Pin, D0_Pin);
-    printf("iorq_wait = %d\n", offset1);
+    //printf("iorq_wait = %d\n", offset1);
 
     // PIO1: pin assign
 	// RD,WR,MREQ,IORQ,WAIT
 	pio_gpio_init(pio1, RD_Pin);
 	pio_gpio_init(pio1, WR_Pin);
-	pio_gpio_init(pio1, MREQ_Pin);
+	//pio_gpio_init(pio1, MREQ_Pin);
 	pio_gpio_init(pio1, IORQ_Pin);
 	pio_gpio_init(pio1, WAIT_Pin);
 
@@ -327,25 +338,40 @@ __attribute__((noinline)) int __time_critical_func(main)(void)
     //
     // Z80 test codes
     // 
-#if 0
+#if 1
     // halt
-    mem[2] = 0x76;
+    mem[1] = 0x76;
+#endif
+#if 1
+    mem[0] = 0xc3;
+    mem[1] = 0x00;
+    mem[2] = 0x00;
+    mem[0x78] = 0xc3;
+    mem[0x79] = 0x00;
+    mem[0x7a] = 0x00;
 #endif
 #if 0
     // jr loop
     mem[0] = 0x18;
     mem[1] = 0xfe;
+    mem[2] = 0x18;
+    mem[3] = 0xfc;
 #endif
 #if 0
     // JP 0000H
-    mem[0] = 0xc3;
+    mem[0] = 0xc3;  // LD HL, 7F00H
     mem[1] = 0x00;
     mem[2] = 0x00;
+    mem[3] = 0x00;
+    mem[4] = 0x34;
+    mem[5] = 0x34;
+    mem[6] = 0x34;
+    mem[7] = 0x34;
 #endif
 #if 0
     // INC (HL), JR 0xfc
     mem[0] = 0x21;  // LD HL, 7F00H
-    mem[1] = 0x00;
+    mem[1] = 0x4f;
     mem[2] = 0x7f;
     mem[3] = 0x34;  // INC (HL)
     mem[4] = 0x18;  // JR
