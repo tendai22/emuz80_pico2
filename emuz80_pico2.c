@@ -177,6 +177,7 @@ loop:
         TOGGLE();
         mem[port & ADDR_MASK] = (port >> D0_Pin) & 0xff;
         TOGGLE();
+        //while (((port = gpio_get_all()) & (1<<WR_Pin)) == 0);
         goto loop;
     }
     port = gpio_get_all();      // re-read to confirm status lines
@@ -364,11 +365,11 @@ __attribute__((noinline)) int __time_critical_func(main)(void)
     mem[4] = 0x18;  // JR
     mem[5] = 0xfd;  // -3
 #endif
-#if 0
+#if 1
     // inc (hl) loop
     mem[0] = 0x21;
-    mem[1] = 0x38;
-    mem[2] = 0x00;
+    mem[1] = 0x00;
+    mem[2] = 0x01;
     mem[3] = 0x34;
     mem[4] = 0x18;
     mem[5] = 0xfd;
@@ -406,7 +407,7 @@ __attribute__((noinline)) int __time_critical_func(main)(void)
     }
     printf("\n");
 #endif
-#if 1
+#if 0
     // UART R/W test
     for (int i = 0; i < sizeof uart_test; ++i)
         mem[i] = uart_test[i];
