@@ -183,8 +183,11 @@ loop:
         // Memory Write Cycle
         // store data to mem[addr], asynchronously
         TOGGLE();
+        //gpio_set_dir_masked((0xff<<D0_Pin), 0);
         mem[port & ADDR_MASK] = (port >> D0_Pin) & 0xff;
         TOGGLE();
+        while (((port = gpio_get_all()) & (1<<WR_Pin)) == 0);
+        //gpio_set_dir_masked((0xff<<D0_Pin), (0xff<<D0_Pin));
         goto loop;
     }
     port = gpio_get_all();      // re-read to confirm status lines
@@ -264,9 +267,6 @@ __attribute__((noinline)) int __time_critical_func(main)(void)
 
 	// data bus
 
-	for (int i = 0; i < 8; ++i)
-        pio_gpio_init(pio0, D0_Pin + i);
-
     //
     // PIO StateMachine(SM) initialzation
     //
@@ -300,6 +300,16 @@ __attribute__((noinline)) int __time_critical_func(main)(void)
     offset1 = pio_add_program(pio1, &iorq_wait_program);
     iorq_wait_program_init(pio1, 3, offset1, WAIT_Pin, D0_Pin);
     //printf("iorq_wait = %d\n", offset1);
+
+    //
+    // databus handling
+    // 
+    for (int i = 0; i < 8; ++i) {
+        //gpio_disable_pulls(D0_Pin + i);
+        //gpio_set_pulls(D0_Pin + i, true, false);
+        pio_gpio_init(pio0, D0_Pin + i);
+    }
+    gpio_set_dir_masked((0xff<<D0_Pin), (0xff<<D0_Pin));    // set OUTPUTs(1) or INPUTs(0)
 
     // PIO1: pin assign
 	// RD,WR,MREQ,IORQ,WAIT
