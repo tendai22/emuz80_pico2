@@ -5,8 +5,14 @@
 #include "hardware/uart.h"
 #include "pico/multicore.h"
 #include "hardware/gpio.h"
+
+#define USE_USB
+#ifdef USE_USB
 #include "tusb.h"
 #include "pico/stdio_usb.h"
+#else
+#define tud_cdc_write_available() 1 
+#endif
 //
 // Pin Definitions
 // This section should be located
@@ -45,11 +51,11 @@ void gpio_out_init(uint gpio, bool value) {
 uint8_t mem[65536];
 
 uint8_t uart_test[] = {
-0x31, 0x00, 0x80,   // LD SP, 0x8000
+0x31, 0x00, 0x01,   // LD SP, 0x0100
 //loop0:
 0xDB, 0x01,         // IN A, (0x1)
 0xCB, 0x47,         // BIT 0, A
-0x28, 0xF9,         // JR Z, loop0(0003H)
+0x28, 0xFA,         // JR Z, loop0(0003H)
 0xDB, 0x00,         // LD A, (0x0)
 0xFE, 0x61,         // CP A, 'a'
 0x38, 0x06,         // JR C, label1
@@ -163,6 +169,8 @@ __attribute__((noinline)) void __time_critical_func(core1_entry)(void) {
 
     multicore_fifo_push_blocking(FLAG_VALUE);
     uint32_t g = multicore_fifo_pop_blocking();
+    pio_sm_clear_fifos(pio0, 2);
+
 loop:
     while(((port = gpio_get_all()) & ((1<<IORQ_Pin)|(1<<WR_Pin))) == ((1<<IORQ_Pin)|(1<<WR_Pin))) {
         // All other cycles, except neither IORQ nor WR.
@@ -221,7 +229,7 @@ __attribute__((noinline)) int __time_critical_func(main)(void)
 {
     stdio_init_all();
     setbuf(stdout, NULL);
-    sleep_ms(300);     // needed for starting USB printf
+    sleep_ms(500);     // needed for starting USB printf
     printf("---start---\n");
 
     // Z80 Input pin initialize
@@ -364,10 +372,10 @@ __attribute__((noinline)) int __time_critical_func(main)(void)
     mem[4] = 0x18;  // JR
     mem[5] = 0xfd;  // -3
 #endif
-#if 0
+#if 1
     // inc (hl) loop
     mem[0] = 0x21;
-    mem[1] = 0x38;
+    mem[1] = 0x80;
     mem[2] = 0x00;
     mem[3] = 0x34;
     mem[4] = 0x18;
@@ -406,7 +414,7 @@ __attribute__((noinline)) int __time_critical_func(main)(void)
     }
     printf("\n");
 #endif
-#if 1
+#if 0
     // UART R/W test
     for (int i = 0; i < sizeof uart_test; ++i)
         mem[i] = uart_test[i];
@@ -431,7 +439,6 @@ __attribute__((noinline)) int __time_critical_func(main)(void)
     sleep_us(10);
     pio_sm_set_enabled(pio1, 3, true);  // iorq_wait
     sleep_us(10);
-    pio_sm_clear_fifos(pio0, 2);
 
     //
     // core1 (bus read/write loop)
@@ -450,8 +457,8 @@ __attribute__((noinline)) int __time_critical_func(main)(void)
 
     // start Z80 CPU
 
-    gpio_put(RESET_Pin, true);
     printf("reset High, start\n");
+    gpio_put(RESET_Pin, true);
 
     core0_entry();
     // NOT REACHED
