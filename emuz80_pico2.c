@@ -12,20 +12,17 @@
 // This section should be located
 // before #include "blink.pio.h"
 //
-#define D0_Pin 16
-#define RD_Pin 26
-#define WR_Pin 30
-#define MREQ_Pin 25
-#define IORQ_Pin 24
-//#define DEBUG_Pin 36
-#define WAIT_Pin 31
-//#define RFSH_Pin 28
-//#define M1_Pin   27
-#define RESET_Pin 42
-//#define BUSAK_Pin 29
-//#define BUSRQ_Pin 43
-//#define INT_Pin  41
+// New Pin Assigns, avoid using Pin23 (which we cannot use on WeAct RP2350B CoreBoard)
+#define D0_Pin 24
+#define RD_Pin 16
+#define WR_Pin 17
+#define IORQ_Pin 18
+#define WAIT_Pin 19
+#define M1_Pin   20
 #define CLK_Pin  40
+#define INT_Pin  41
+#define RESET_Pin 42
+#define BUSRQ_Pin 43
 #define TEST_Pin 45
 
 #define FLAG_VALUE 123
@@ -169,12 +166,16 @@ loop:
     while(((port = gpio_get_all()) & ((1<<IORQ_Pin)|(1<<WR_Pin))) == ((1<<IORQ_Pin)|(1<<WR_Pin))) {
         // All other cycles, except neither IORQ nor WR.
         // output mem[addr] asynchronously
+        //TOGGLE();
         pio_sm_put(pio0, 2, mem[port & 0xffff]);
+        //TOGGLE();
     }
     if ((port & ((1<<IORQ_Pin)|(1<<WR_Pin))) == (1<<IORQ_Pin)) {
         // Memory Write Cycle
         // store data to mem[addr], asynchronously
+        TOGGLE();
         mem[port & 0xffff] = (port >> D0_Pin);
+        TOGGLE();
         goto loop;
     }
     port = gpio_get_all();      // re-read to confirm status lines
@@ -227,8 +228,8 @@ __attribute__((noinline)) int __time_critical_func(main)(void)
     // GPIO Out
     gpio_out_init(WAIT_Pin, true);
     gpio_out_init(RESET_Pin, false);
-    //gpio_out_init(BUSRQ_Pin, true);
-    //gpio_out_init(INT_Pin, false);      // INT Pin has an inverter, so negate signal is needed
+    gpio_out_init(BUSRQ_Pin, true);
+    gpio_out_init(INT_Pin, false);      // INT Pin has an inverter, so negate signal is needed
 
     gpio_out_init(TEST_Pin, false);
 
@@ -237,7 +238,7 @@ __attribute__((noinline)) int __time_critical_func(main)(void)
     //
     gpio_init_mask(0xffff);     // A0-A15 input 
     //gpio_init(BUSAK_Pin);
-    gpio_init(MREQ_Pin);
+    //gpio_init(MREQ_Pin);
     gpio_init(IORQ_Pin);
     //gpio_init(RFSH_Pin);
     gpio_init(RD_Pin);
@@ -265,8 +266,8 @@ __attribute__((noinline)) int __time_critical_func(main)(void)
     pio_set_gpio_base(pio1, 16);
     //
     // PIO0:SM0,1
-	//   in: RD_Pin(32), count: 1
-	//   sideset: D0_Pin(16),D4_Pin(20), count: 4
+	//   in: RD_Pin(16), count: 1
+	//   sideset: D0_Pin(24),D4_Pin(28), count: 4
     printf("---start---\n");
 	offset1 = pio_add_program(pio0, &set_pindirs_program);
     printf("set_pindir: %d\n", offset1);
@@ -274,7 +275,7 @@ __attribute__((noinline)) int __time_critical_func(main)(void)
 	set_pindirs_program_init(pio0, 1, offset1, D0_Pin + 4, RD_Pin);
 
 	// PIO0:SM2: data_out
-	//	 OUT: D0_Pin(16), count: 8
+	//	 OUT: D0_Pin(24), count: 8
     offset1 = pio_add_program(pio0, &data_out_program);
     data_out_program_init(pio0, 2, offset1, D0_Pin);
     printf("data_out = %d\n", offset1);
@@ -286,8 +287,8 @@ __attribute__((noinline)) int __time_critical_func(main)(void)
     clockgen_program_init(pio0, 3, offset1, CLK_Pin, 1);
 
     // PIO1: SM3 ... IO cycle WAIT handler
-    //   SET: BASE: 31(WAIT_Pin)
-    //   wait: 24(IORQ_Pin)
+    //   SET: BASE: 19(WAIT_Pin)
+    //   wait: 18(IORQ_Pin)
     offset1 = pio_add_program(pio1, &iorq_wait_program);
     iorq_wait_program_init(pio1, 3, offset1, WAIT_Pin, D0_Pin);
     printf("iorq_wait = %d\n", offset1);
@@ -296,7 +297,7 @@ __attribute__((noinline)) int __time_critical_func(main)(void)
 	// RD,WR,MREQ,IORQ,WAIT
 	pio_gpio_init(pio1, RD_Pin);
 	pio_gpio_init(pio1, WR_Pin);
-	pio_gpio_init(pio1, MREQ_Pin);
+	//pio_gpio_init(pio1, MREQ_Pin);
 	pio_gpio_init(pio1, IORQ_Pin);
 	pio_gpio_init(pio1, WAIT_Pin);
 

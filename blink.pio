@@ -8,8 +8,8 @@
 
 ;
 ; PIO0:SM0,1 ... set_pindirs
-;   in: RD_Pin(32), count: 1
-;   sideset: D0_Pin(16),D4_Pin(20), count: 4
+;   in: RD_Pin(16), count: 1
+;   sideset: D0_Pin(24),D4_Pin(28), count: 4
 .program set_pindirs
 .origin 0
 .side_set 4 pindirs
@@ -18,7 +18,7 @@
 
 ;
 ; PIO0:SM2: data_out
-;   OUT: D0_Pin(16), count: 8
+;   OUT: D0_Pin(24), count: 8
 .program data_out
 .wrap_target
     out pins, 8
@@ -44,15 +44,15 @@
 
 ;
 ; PIO1:SM3: iorq_wait
-;   SET: WAIT_Pin(31), count: 1
+;   SET: WAIT_Pin(19), count: 1
 .program iorq_wait
     set pins, 1
 .wrap_target
-    wait 0 gpio 24     ; IORQ_Pin(35)
-    set pins, 0         ; WAIT_PIn(31) Low
+    wait 0 gpio 18     ; IORQ_Pin(18)
+    set pins, 0         ; WAIT_PIn(19) Low
     pull                ; wait for MainCPU work done
-    set pins, 1         ; WAIT_Pin(31) High
-    wait 1 gpio 24     ; IORQ_Pin(35)
+    set pins, 1         ; WAIT_Pin(19) High
+    wait 1 gpio 18     ; IORQ_Pin(18)
     push
 .wrap
 
@@ -86,8 +86,8 @@ void clockgen_program_init(PIO pio, uint sm, uint offset, uint pin, uint phase) 
 }
 
 void set_pindirs_program_init(PIO pio, uint sm, uint offset, uint data_pin, uint rd_pin) {
-	//   in: RD_Pin(32), count: 1
-	//   sideset: D0_Pin(16),D4_Pin(20), count: 4
+	//   in: RD_Pin(16), count: 1
+	//   sideset: D0_Pin(24),D4_Pin(28), count: 4
     pio_sm_set_consecutive_pindirs(pio, sm, rd_pin, 1, false);
     pio_sm_config c = set_pindirs_program_get_default_config(offset);
     sm_config_set_in_pins(&c, rd_pin);
@@ -98,7 +98,7 @@ void set_pindirs_program_init(PIO pio, uint sm, uint offset, uint data_pin, uint
 }
 
 void data_out_program_init(PIO pio, uint sm, uint offset, uint d0_pin) {
-	//	 OUT: D0_Pin(16), count: 8
+	//	 OUT: D0_Pin(24), count: 8
     pio_sm_set_consecutive_pindirs(pio, sm, d0_pin, 8, true);
     pio_sm_config c = data_out_program_get_default_config(offset);
     sm_config_set_out_pins(&c, d0_pin, 8);
@@ -108,8 +108,8 @@ void data_out_program_init(PIO pio, uint sm, uint offset, uint d0_pin) {
 }
 
 void iorq_wait_program_init(PIO pio, uint sm, uint offset, uint wait_pin, uint d0_pin) {
-	//   IN: IORQ_Pin(35), count 1
-	//	 SET: WAIT_Pin(31), count: 1
+	//   IN: IORQ_Pin(18), count 1
+	//	 SET: WAIT_Pin(19), count: 1
     //pio_sm_set_consecutive_pindirs(pio, sm, iorq_pin, 1, false);
     pio_sm_set_consecutive_pindirs(pio, sm, wait_pin, 1, true);
     pio_sm_config c = iorq_wait_program_get_default_config(offset);
