@@ -6,7 +6,16 @@
 #include "pico/multicore.h"
 #include "hardware/gpio.h"
 
+//
+// General Configuration
+//
 #define USE_USB
+//#define GPIO_32
+
+
+//
+// USB CDC
+//
 #ifdef USE_USB
 #include "tusb.h"
 #include "pico/stdio_usb.h"
@@ -37,8 +46,14 @@
 #include "blink.pio.h"
 
 static int toggle_value = 1;
+#ifdef GPIO_32
+#define TOGGLE() do {    gpio_xor_mask((1)<<TEST_Pin); } while(0)
+#define TOGGLE1() do {    gpio_xor_mask((1)<<TEST_Pin); sleep_us(1); } while(0)
+#else
 #define TOGGLE() do {    gpio_xor_mask64(((uint64_t)1)<<TEST_Pin); } while(0)
 #define TOGGLE1() do {    gpio_xor_mask64(((uint64_t)1)<<TEST_Pin); sleep_us(1); } while(0)
+#endif
+
 //#define TOGGLE() do {    (*(volatile uint32_t *)&(sio_hw->gpio_hi_togl)) = 1; } while(0)
 //#define TOGGLE() do { gpio_put(TEST_Pin, (toggle_value ^= 1));    } while(0)
 
@@ -182,10 +197,10 @@ loop:
     if ((port & ((1<<IORQ_Pin)|(1<<WR_Pin))) == (1<<IORQ_Pin)) {
         // Memory Write Cycle
         // store data to mem[addr], asynchronously
-        TOGGLE();
+        //TOGGLE();
         //gpio_set_dir_masked((0xff<<D0_Pin), 0);
         mem[port & ADDR_MASK] = (port >> D0_Pin) & 0xff;
-        TOGGLE();
+        //TOGGLE();
         while (((port = gpio_get_all()) & (1<<WR_Pin)) == 0);
         //gpio_set_dir_masked((0xff<<D0_Pin), (0xff<<D0_Pin));
         goto loop;
