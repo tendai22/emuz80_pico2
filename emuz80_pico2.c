@@ -140,6 +140,7 @@ int getch(void)
 
 void putch(uint32_t c)
 {
+    sleep_us(100);
     putchar_raw(c);
 }
 
@@ -358,7 +359,7 @@ __attribute__((noinline)) int __time_critical_func(main)(void)
         mem[i] = 0;
     // copy prog1
 #ifdef EMUBASIC_IO
-    //memcpy(&mem[0], &emuz80_binary[0], sizeof emuz80_binary);
+    //amemcpy(&mem[0], &emuz80_binary[0], sizeof emuz80_binary);
 #endif
 #ifdef EMUBASIC
     memcpy(&mem[0], &emuz80_binary[0], sizeof emuz80_binary);
@@ -416,7 +417,7 @@ __attribute__((noinline)) int __time_critical_func(main)(void)
     mem[4] = 0x18;  // JR
     mem[5] = 0xfd;  // -3
 #endif
-#if 1
+#if 0
     // inc (hl) loop
     mem[0] = 0x21;
     mem[1] = 0x80;
@@ -433,13 +434,15 @@ __attribute__((noinline)) int __time_critical_func(main)(void)
     mem[2] = 0x18;  // jr
     mem[3] = 0xfc;  // -4 
 #endif
-#if 0
+#if 1
     // out 0h loop
-    mem[0] = 0xd3;  // OUT 0H
-    mem[1] = 0x00;
-    mem[2] = 0x3c;  // INC A
-    mem[3] = 0x18;  // jr
-    mem[4] = 0xfb;  // -5 
+    mem[0] = 0x3e;
+    mem[1] = 0x41;
+    mem[2] = 0xd3;  // OUT 0H
+    mem[3] = 0x00;
+    mem[4] = 0x3c;  // INC A
+    mem[5] = 0x18;  // jr
+    mem[6] = 0xfb;  // -5 
 #endif
 # if 0
     // UART TEST (IO port version)
