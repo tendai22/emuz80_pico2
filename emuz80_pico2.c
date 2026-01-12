@@ -104,6 +104,8 @@ uint8_t uart_data_rx = 0;
 #define EMUBASIC_IO
 #include "emubasic_io.h"
 
+static int cdc_itf = 0;
+
 //
 // usb cdc putchar/getchar
 //
@@ -144,33 +146,69 @@ void putch(uint32_t c)
     putchar_raw(c);
 }
 
+
+void cdc_task(void) {
+    if (tud_cdc_available()) {
+        char buf[64];
+        uint32_t count = tud_cdc_read(buf, sizeof(buf));
+        tud_cdc_write(buf, count);
+        tud_cdc_write_flush();
+    }
+}
+
 //
 // core0 のメインループ
 // この関数からリターンしない。
 __attribute__((noinline)) void __time_critical_func(core0_entry)(void)
 {
-    // usb serial handling
+    // USB CDC test
     int c;
+    uint8_t cb;
+#if 0
+    uint32_t data;
+    uint32_t cmd;
+    printf("cdc test start, cdc_itf = %d\n", cdc_itf);
+    while (1) {
+        tud_task();
+        if (multicore_fifo_pop_timeout_us(64, &cmd) == false) {
+            continue;
+        }
+        cdc_task();
+    }
+#endif
+    // usb serial handling
     uint32_t data;
     uint32_t cmd;
     while (1) {
-        cmd = multicore_fifo_pop_blocking();
+        tud_task();
+        //cmd = multicore_fifo_pop_blocking();
+        while (multicore_fifo_pop_timeout_us(64, &cmd) == false)
+            tud_task();
         if (cmd & 0x200) {
             // status register read
             data = 0;
-            if (kbhit())
+            if (tud_cdc_n_available(cdc_itf) > 0)
                 data |= (1<<0);
-            if (tud_cdc_write_available() > 0)
+            if ((c = tud_cdc_n_write_available(cdc_itf)) > 0)
                 data |= (1<<1);
+            //data = c;
         } else if (cmd & 0x100) {
             // data register read
-            data = getch();
+            //data = getch();
+            tud_cdc_n_read(cdc_itf, &c, 1);
+            data = c;
         } else {
             // data register write
-            putch(cmd);
+            //putch(cmd);
+            c = cmd & 0xff;
+            tud_cdc_n_write(cdc_itf, &c, 1);
+            //tud_task();
+            tud_cdc_n_write_flush(cdc_itf);
             data = 'Y';
         }
-        multicore_fifo_push_blocking(data);
+        //multicore_fifo_push_blocking(data);
+        while (multicore_fifo_push_timeout_us(data, 64) == false)
+            tud_task();
     }
 
 }
@@ -224,18 +262,20 @@ loop:
                 pio_sm_put(pio_data_out, sm_data_out, status);
             } else if (addr == 0) {
                 uint8_t data = 0;
+                uint32_t dummy;
                 multicore_fifo_push_blocking(0x100);    // read rx data cmd 0x100
-                data = multicore_fifo_pop_blocking();
-                pio_sm_put(pio_data_out, sm_data_out, data);
+                multicore_fifo_pop_timeout_us(330, &dummy);
+                pio_sm_put(pio_data_out, sm_data_out, dummy);
             }
         } else if ((port & (1<<WR_Pin)) == 0) {
             // IO Write cycle
+            uint32_t dummy;
             addr = port & 0xff;
             data = ((port>>D0_Pin)&0xff);
             if (addr == 0) {
                 // UART DR
                 multicore_fifo_push_blocking(data & 0xff);     // write tx data cmd 0-0xff
-                multicore_fifo_pop_blocking();
+                multicore_fifo_pop_timeout_us(10000, &dummy);
             }
         }
         pio_sm_put(pio1, 3, 0); // notify IO process finished to the state machine
@@ -246,7 +286,6 @@ loop:
     }
     goto loop;
 }
-
 
 __attribute__((noinline)) int __time_critical_func(main)(void) 
 {
@@ -345,7 +384,7 @@ __attribute__((noinline)) int __time_critical_func(main)(void)
 
     // input override
     // These should be below pio_gpio_init
-    for (int i = WAIT_Pin; i < 30; i++) {
+    for (int i = WAIT_Pin; i < RD_Pin + 5 ; i++) {
         printf ("inover: %d\n", i);
         gpio_set_input_enabled(i, false);
         gpio_set_inover(i, GPIO_OVERRIDE_LOW);
@@ -353,13 +392,16 @@ __attribute__((noinline)) int __time_critical_func(main)(void)
     }
 
 
-
+    //
+    // tinyUSB CDC check
+    //
+    cdc_itf = 0;
     // mem clear
     for (int i = 0 ; i < sizeof mem; ++i)
         mem[i] = 0;
     // copy prog1
 #ifdef EMUBASIC_IO
-    //amemcpy(&mem[0], &emuz80_binary[0], sizeof emuz80_binary);
+    //memcpy(&mem[0], &emuz80_binary[0], sizeof emuz80_binary);
 #endif
 #ifdef EMUBASIC
     memcpy(&mem[0], &emuz80_binary[0], sizeof emuz80_binary);
@@ -434,7 +476,7 @@ __attribute__((noinline)) int __time_critical_func(main)(void)
     mem[2] = 0x18;  // jr
     mem[3] = 0xfc;  // -4 
 #endif
-#if 1
+#if 0
     // out 0h loop
     mem[0] = 0x3e;
     mem[1] = 0x41;
@@ -448,11 +490,13 @@ __attribute__((noinline)) int __time_critical_func(main)(void)
     // UART TEST (IO port version)
     uint8_t mem0[] = {
         0x31, 0x00, 0x80,
-        0xDB, 0x01,
-        0xCB, 0x4F,
-        0x28, 0xFA,
-        0x3E, 0x41,
-        0xD3, 0x00,
+        0x06, 0x41,         // LD B, 0x41
+        0xDB, 0x01,         // IN A,(0x01)
+        0xCB, 0x4F,         // BIT 1,A
+        0x28, 0xFA,         // JR $-6
+        0x78,               // LD A,B
+        0xD3, 0x00,         // OUT (0x00),A
+        0x04,               // INC B
         0x18, 0xF4,
     };
     for (int i = 0; i < sizeof mem0; ++i) {
@@ -461,7 +505,7 @@ __attribute__((noinline)) int __time_critical_func(main)(void)
     }
     printf("\n");
 #endif
-#if 0
+#if 1
     // UART R/W test
     for (int i = 0; i < sizeof uart_test; ++i)
         mem[i] = uart_test[i];

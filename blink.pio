@@ -17,6 +17,10 @@
     mov pc, pins side 0x0
     mov pc, pins side 0xf
     mov pc, pins side 0x0
+    mov pc, pins side 0xf
+    mov pc, pins side 0x0
+    mov pc, pins side 0xf
+    mov pc, pins side 0x0
 
 ;
 ; PIO0:SM2: data_out
