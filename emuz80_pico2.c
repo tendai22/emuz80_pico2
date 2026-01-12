@@ -159,6 +159,9 @@ void cdc_task(void) {
 //
 // core0 のメインループ
 // この関数からリターンしない。
+
+int rxrdy = 0, txrdy = 1;
+
 __attribute__((noinline)) void __time_critical_func(core0_entry)(void)
 {
     // USB CDC test
@@ -179,36 +182,56 @@ __attribute__((noinline)) void __time_critical_func(core0_entry)(void)
     // usb serial handling
     uint32_t data;
     uint32_t cmd;
+    int count = 0, rcount = 0;
     while (1) {
         tud_task();
         //cmd = multicore_fifo_pop_blocking();
-        while (multicore_fifo_pop_timeout_us(64, &cmd) == false)
+        while (multicore_fifo_pop_timeout_us(10000, &cmd) == false)
             tud_task();
         if (cmd & 0x200) {
             // status register read
             data = 0;
-            if (tud_cdc_n_available(cdc_itf) > 0)
-                data |= (1<<0);
-            if ((c = tud_cdc_n_write_available(cdc_itf)) > 0)
-                data |= (1<<1);
-            //data = c;
+            if (1) {
+                if (rxrdy != 0 || tud_cdc_n_available(cdc_itf) > 0) {
+                    rxrdy = 1;
+                    data |= (1<<0);
+                }
+                tud_task();
+                if (count-- <= 0 || txrdy != 0 || (c = tud_cdc_n_write_available(cdc_itf)) > 0) {
+                    count = 0;
+                    txrdy = 1;
+                    data |= (1<<1);
+                }
+            }
         } else if (cmd & 0x100) {
             // data register read
             //data = getch();
             tud_cdc_n_read(cdc_itf, &c, 1);
+            rxrdy = 0;
             data = c;
         } else {
             // data register write
-            //putch(cmd);
+            putch(cmd);
+#if 0
             c = cmd & 0xff;
+            //while (tud_cdc_n_write(cdc_itf, &c, 1) == 0)
+            //    tud_task();
+            tud_task();
             tud_cdc_n_write(cdc_itf, &c, 1);
-            //tud_task();
+            tud_task();
             tud_cdc_n_write_flush(cdc_itf);
+#endif
+            count = 1000;
+            txrdy = 0;
+            //while (tud_cdc_n_write_available(cdc_itf) < 0x40)
+            //    tud_task();
             data = 'Y';
         }
         //multicore_fifo_push_blocking(data);
-        while (multicore_fifo_push_timeout_us(data, 64) == false)
-            tud_task();
+        //while (multicore_fifo_push_timeout_us(data, 32) == false)
+        //    tud_task();
+        tud_task();
+        multicore_fifo_push_blocking(data);
     }
 
 }
@@ -262,12 +285,13 @@ loop:
                 pio_sm_put(pio_data_out, sm_data_out, status);
             } else if (addr == 0) {
                 uint8_t data = 0;
-                uint32_t dummy;
+                uint32_t dummy = 0xfe;
                 multicore_fifo_push_blocking(0x100);    // read rx data cmd 0x100
-                multicore_fifo_pop_timeout_us(330, &dummy);
+                //multicore_fifo_pop_timeout_us(330, &dummy);
+                dummy = multicore_fifo_pop_blocking();
                 pio_sm_put(pio_data_out, sm_data_out, dummy);
             }
-        } else if ((port & (1<<WR_Pin)) == 0) {
+        } else if (((port) & (1<<WR_Pin)) == 0) {
             // IO Write cycle
             uint32_t dummy;
             addr = port & 0xff;
@@ -275,7 +299,7 @@ loop:
             if (addr == 0) {
                 // UART DR
                 multicore_fifo_push_blocking(data & 0xff);     // write tx data cmd 0-0xff
-                multicore_fifo_pop_timeout_us(10000, &dummy);
+                dummy = multicore_fifo_pop_blocking();
             }
         }
         pio_sm_put(pio1, 3, 0); // notify IO process finished to the state machine
@@ -486,7 +510,7 @@ __attribute__((noinline)) int __time_critical_func(main)(void)
     mem[5] = 0x18;  // jr
     mem[6] = 0xfb;  // -5 
 #endif
-# if 0
+# if 1
     // UART TEST (IO port version)
     uint8_t mem0[] = {
         0x31, 0x00, 0x80,
@@ -505,7 +529,7 @@ __attribute__((noinline)) int __time_critical_func(main)(void)
     }
     printf("\n");
 #endif
-#if 1
+#if 0
     // UART R/W test
     for (int i = 0; i < sizeof uart_test; ++i)
         mem[i] = uart_test[i];
