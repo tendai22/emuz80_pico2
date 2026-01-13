@@ -10,7 +10,7 @@
 // General Configuration
 //
 #define USE_USB
-//#define GPIO_32
+#define GPIO_32
 
 
 //
@@ -39,7 +39,7 @@
 #define WAIT_Pin 27
 #define RESET_Pin 28
 #define CLK_Pin  29
-//#define TEST_Pin 29
+//#define TEST_Pin 15
 
 #define pio_data_out pio0
 #define sm_data_out 2
@@ -260,6 +260,7 @@ loop:
         pio_sm_put(pio_data_out, sm_data_out, mem[port & ADDR_MASK]);
         //TOGGLE();
     }
+    port = gpio_get_all();      // re-read to confirm status lines
     if ((port & ((1<<IORQ_Pin)|(1<<WR_Pin))) == (1<<IORQ_Pin)) {
         // Memory Write Cycle
         // store data to mem[addr], asynchronously
@@ -271,7 +272,7 @@ loop:
         //gpio_set_dir_masked((0xff<<D0_Pin), (0xff<<D0_Pin));
         goto loop;
     }
-    port = gpio_get_all();      // re-read to confirm status lines
+    //port = gpio_get_all();      // re-read to confirm status lines
     if ((port & (1<<IORQ_Pin)) == 0) {
         if ((port & (1<<RD_Pin)) == 0) {
             // IO Read cycle
@@ -328,6 +329,10 @@ __attribute__((noinline)) int __time_critical_func(main)(void)
 
 #if defined(TEST_Pin)
     gpio_out_init(TEST_Pin, false);
+    gpio_set_input_enabled(TEST_Pin, false);
+    gpio_set_inover(TEST_Pin, GPIO_OVERRIDE_LOW);
+    gpio_set_slew_rate(TEST_Pin, GPIO_SLEW_RATE_FAST);
+    printf ("TEST_Pin inover: %d\n", TEST_Pin);
 #endif
     // GPIO In
     // MREQ, IORQ, RD, RFSH, M1 are covered by PIO
@@ -425,7 +430,7 @@ __attribute__((noinline)) int __time_critical_func(main)(void)
         mem[i] = 0;
     // copy prog1
 #ifdef EMUBASIC_IO
-    //memcpy(&mem[0], &emuz80_binary[0], sizeof emuz80_binary);
+    memcpy(&mem[0], &emuz80_binary[0], sizeof emuz80_binary);
 #endif
 #ifdef EMUBASIC
     memcpy(&mem[0], &emuz80_binary[0], sizeof emuz80_binary);
@@ -510,7 +515,7 @@ __attribute__((noinline)) int __time_critical_func(main)(void)
     mem[5] = 0x18;  // jr
     mem[6] = 0xfb;  // -5 
 #endif
-# if 1
+# if 0
     // UART TEST (IO port version)
     uint8_t mem0[] = {
         0x31, 0x00, 0x80,
