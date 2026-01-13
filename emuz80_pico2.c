@@ -182,32 +182,25 @@ __attribute__((noinline)) void __time_critical_func(core0_entry)(void)
     // usb serial handling
     uint32_t data;
     uint32_t cmd;
-    int count = 0, rcount = 0;
+    //int count = 0, rcount = 0;
     while (1) {
         tud_task();
-        //cmd = multicore_fifo_pop_blocking();
-        while (multicore_fifo_pop_timeout_us(10000, &cmd) == false)
-            tud_task();
+        cmd = multicore_fifo_pop_blocking();
+        //while (multicore_fifo_pop_timeout_us(10000, &cmd) == false)
+        //    tud_task();
         if (cmd & 0x200) {
             // status register read
             data = 0;
-            if (1) {
-                if (rxrdy != 0 || tud_cdc_n_available(cdc_itf) > 0) {
-                    rxrdy = 1;
-                    data |= (1<<0);
-                }
-                tud_task();
-                if (count-- <= 0 || txrdy != 0 || (c = tud_cdc_n_write_available(cdc_itf)) > 0) {
-                    count = 0;
-                    txrdy = 1;
-                    data |= (1<<1);
-                }
+            if (tud_cdc_n_available(cdc_itf) > 0) {
+                data |= (1<<0);
+            }
+            if (tud_cdc_n_write_available(cdc_itf) > 0) {
+                data |= (1<<1);
             }
         } else if (cmd & 0x100) {
             // data register read
             //data = getch();
             tud_cdc_n_read(cdc_itf, &c, 1);
-            rxrdy = 0;
             data = c;
         } else {
             // data register write
@@ -221,8 +214,6 @@ __attribute__((noinline)) void __time_critical_func(core0_entry)(void)
             tud_task();
             tud_cdc_n_write_flush(cdc_itf);
 #endif
-            count = 1000;
-            txrdy = 0;
             //while (tud_cdc_n_write_available(cdc_itf) < 0x40)
             //    tud_task();
             data = 'Y';
@@ -260,6 +251,7 @@ loop:
         pio_sm_put(pio_data_out, sm_data_out, mem[port & ADDR_MASK]);
         //TOGGLE();
     }
+    // IN AE-RP2040, this 2nd port reading is needed here.
     port = gpio_get_all();      // re-read to confirm status lines
     if ((port & ((1<<IORQ_Pin)|(1<<WR_Pin))) == (1<<IORQ_Pin)) {
         // Memory Write Cycle
