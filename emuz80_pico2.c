@@ -33,9 +33,9 @@
 //
 #define D0_Pin 16
 #define ADDR_MASK 0xffff
-#define RD_Pin 24
-#define WR_Pin 25
-#define IORQ_Pin 26
+#define IORQ_Pin 24
+#define RD_Pin 25
+#define WR_Pin 26
 #define WAIT_Pin 27
 #define RESET_Pin 28
 #define CLK_Pin  29
@@ -252,7 +252,9 @@ loop:
         //TOGGLE();
     }
     // IN AE-RP2040, this 2nd port reading is needed here.
-    port = gpio_get_all();      // re-read to confirm status lines
+    // Adding 1kohm resister on WR line so as to delay and give an advance
+    // to IORQ, removing 'port = gpio_get_all()' and some speed-up is achieved.
+    //port = gpio_get_all();      // re-read to confirm status lines
     if ((port & ((1<<IORQ_Pin)|(1<<WR_Pin))) == (1<<IORQ_Pin)) {
         // Memory Write Cycle
         // store data to mem[addr], asynchronously
@@ -264,7 +266,9 @@ loop:
         //gpio_set_dir_masked((0xff<<D0_Pin), (0xff<<D0_Pin));
         goto loop;
     }
-    //port = gpio_get_all();      // re-read to confirm status lines
+    //TOGGLE();
+    port = gpio_get_all();      // re-read to confirm status lines
+    //TOGGLE();
     if ((port & (1<<IORQ_Pin)) == 0) {
         if ((port & (1<<RD_Pin)) == 0) {
             // IO Read cycle
@@ -405,7 +409,7 @@ __attribute__((noinline)) int __time_critical_func(main)(void)
 
     // input override
     // These should be below pio_gpio_init
-    for (int i = WAIT_Pin; i < RD_Pin + 5 ; i++) {
+    for (int i = WAIT_Pin; i < 30 ; i++) {
         printf ("inover: %d\n", i);
         gpio_set_input_enabled(i, false);
         gpio_set_inover(i, GPIO_OVERRIDE_LOW);
