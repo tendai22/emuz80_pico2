@@ -9,7 +9,9 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 #
 # Pico Board Configuration
 #
-add_compile_options(-D IORQ_Pin=18)
+add_compile_options(-D AE_RP2040)
+#add_compile_options(-D RP2350B)
+#add_compile_options(-D IORQ_Pin=18)
 
 # Initialise pico_sdk from installed location
 # (note this can come from environment, CMake cache etc)

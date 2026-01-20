@@ -15,6 +15,12 @@
 .side_set 4 pindirs
     mov pc, pins side 0xf
     mov pc, pins side 0x0
+    mov pc, pins side 0xf
+    mov pc, pins side 0x0
+    mov pc, pins side 0xf
+    mov pc, pins side 0x0
+    mov pc, pins side 0xf
+    mov pc, pins side 0x0
 
 ;
 ; PIO0:SM2: data_out
@@ -25,7 +31,7 @@
 .wrap
 
 ;
-; PIO0:SM3 ... two/one phase clock generator(program clockgen)
+; PIO1:SM2 ... two/one phase clock generator(program clockgen)
 ;
 ; SET: BASE: 40(CLK_Pin, inverted), 41(INT_Pin, inverted)
 .program clockgen
@@ -114,7 +120,9 @@ void iorq_wait_program_init(PIO pio, uint sm, uint offset, uint wait_pin, uint d
     pio_sm_set_consecutive_pindirs(pio, sm, wait_pin, 1, true);
     pio_sm_config c = iorq_wait_program_get_default_config(offset);
     sm_config_set_in_pins(&c, d0_pin);
+#if defined(RP2350B)
     sm_config_set_in_pin_count(&c, 8);
+#endif
     sm_config_set_in_shift(&c, false, false, 8);
     sm_config_set_out_pins(&c, d0_pin, 8);
     sm_config_set_out_shift(&c, true, false, 8);
