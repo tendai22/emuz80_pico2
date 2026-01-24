@@ -1,10 +1,10 @@
 ;
-; Copyright (c) 2026 Norihiro Kumagai
+; Copyright (c) 2020 Raspberry Pi (Trading) Ltd.
 ;
 ; SPDX-License-Identifier: BSD-3-Clause
 ;
 
-.define IORQ_Pin 18
+; SET pin 0 should be mapped to your LED GPIO
 
 ;
 ; PIO0:SM0,1 ... set_pindirs
@@ -48,11 +48,11 @@
 .program iorq_wait
     set pins, 1
 .wrap_target
-    wait 0 gpio IORQ_Pin     ; IORQ_Pin(18)
+    wait 0 gpio 18     ; IORQ_Pin(18)
     set pins, 0         ; WAIT_PIn(19) Low
     pull                ; wait for MainCPU work done
     set pins, 1         ; WAIT_Pin(19) High
-    wait 1 gpio IORQ_Pin     ; IORQ_Pin(18)
+    wait 1 gpio 18     ; IORQ_Pin(18)
     push
 .wrap
 
