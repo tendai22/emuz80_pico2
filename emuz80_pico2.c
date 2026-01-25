@@ -9,19 +9,14 @@
 //
 // General Configuration
 //
-#define USE_USB
+// Use RP2040, GPIO0-29
 #define GPIO_32
-
 
 //
 // USB CDC
 //
-#ifdef USE_USB
 #include "tusb.h"
 #include "pico/stdio_usb.h"
-#else
-#define tud_cdc_write_available() 1 
-#endif
 //
 // Pin Definitions
 // This section should be located
@@ -92,69 +87,12 @@ uint8_t uart_test[] = {
 0x18, 0xE2,         // JR loop0
 };
 
-//
-// UART Status/Data registers
-//
-uint8_t uart_status = 0;
-uint8_t uart_data_tx = 0;
-uint8_t uart_data_rx = 0;
-
 #undef EMUBASIC
 #include "emuz80.h"
 #define EMUBASIC_IO
 #include "emubasic_io.h"
 
 static int cdc_itf = 0;
-
-//
-// usb cdc putchar/getchar
-//
-static int saved_char = PICO_ERROR_TIMEOUT;
-
-int kbhit(void)
-{
-    int c;
-    if (saved_char != PICO_ERROR_TIMEOUT) {
-        return 1;
-    }
-    saved_char = stdio_getchar_timeout_us(0);
-    return saved_char != PICO_ERROR_TIMEOUT;
-}
-
-int getch(void)
-{
-    int c;
-    uint8_t data = 'Y';
-    if (kbhit()) {
-        data = saved_char;
-        saved_char = PICO_ERROR_TIMEOUT;
-        return data;
-    }
-    c = stdio_getchar();
-    if (c != PICO_ERROR_TIMEOUT) {
-        data = c;
-        saved_char = PICO_ERROR_TIMEOUT;
-    } else {
-        data = 'O';
-    }
-    return data;
-}
-
-void putch(uint32_t c)
-{
-    sleep_us(100);
-    putchar_raw(c);
-}
-
-
-void cdc_task(void) {
-    if (tud_cdc_available()) {
-        char buf[64];
-        uint32_t count = tud_cdc_read(buf, sizeof(buf));
-        tud_cdc_write(buf, count);
-        tud_cdc_write_flush();
-    }
-}
 
 //
 // core0 のメインループ
@@ -167,18 +105,6 @@ __attribute__((noinline)) void __time_critical_func(core0_entry)(void)
     // USB CDC test
     int c;
     uint8_t cb;
-#if 0
-    uint32_t data;
-    uint32_t cmd;
-    printf("cdc test start, cdc_itf = %d\n", cdc_itf);
-    while (1) {
-        tud_task();
-        if (multicore_fifo_pop_timeout_us(64, &cmd) == false) {
-            continue;
-        }
-        cdc_task();
-    }
-#endif
     // usb serial handling
     uint32_t data;
     uint32_t cmd;
@@ -186,8 +112,6 @@ __attribute__((noinline)) void __time_critical_func(core0_entry)(void)
     while (1) {
         tud_task();
         cmd = multicore_fifo_pop_blocking();
-        //while (multicore_fifo_pop_timeout_us(10000, &cmd) == false)
-        //    tud_task();
         if (cmd & 0x200) {
             // status register read
             data = 0;
@@ -199,28 +123,14 @@ __attribute__((noinline)) void __time_critical_func(core0_entry)(void)
             }
         } else if (cmd & 0x100) {
             // data register read
-            //data = getch();
             tud_cdc_n_read(cdc_itf, &c, 1);
             data = c;
         } else {
             // data register write
-            putch(cmd);
-#if 0
-            c = cmd & 0xff;
-            //while (tud_cdc_n_write(cdc_itf, &c, 1) == 0)
-            //    tud_task();
-            tud_task();
-            tud_cdc_n_write(cdc_itf, &c, 1);
-            tud_task();
+            cb = cmd;
+            tud_cdc_n_write(cdc_itf, &cb, 1);
             tud_cdc_n_write_flush(cdc_itf);
-#endif
-            //while (tud_cdc_n_write_available(cdc_itf) < 0x40)
-            //    tud_task();
-            data = 'Y';
         }
-        //multicore_fifo_push_blocking(data);
-        //while (multicore_fifo_push_timeout_us(data, 32) == false)
-        //    tud_task();
         tud_task();
         multicore_fifo_push_blocking(data);
     }
