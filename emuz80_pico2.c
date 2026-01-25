@@ -66,56 +66,15 @@ uint8_t uart_test[] = {
 0x18, 0xE2,         // JR loop0
 };
 
-//
-// UART Status/Data registers
-//
-uint8_t uart_status = 0;
-uint8_t uart_data_tx = 0;
-uint8_t uart_data_rx = 0;
-
 #undef EMUBASIC
 #include "emuz80.h"
 #define EMUBASIC_IO
 #include "emubasic_io.h"
 
 //
-// usb cdc putchar/getchar
+// USB CDC
 //
-static int saved_char = PICO_ERROR_TIMEOUT;
-
-int kbhit(void)
-{
-    int c;
-    if (saved_char != PICO_ERROR_TIMEOUT) {
-        return 1;
-    }
-    saved_char = stdio_getchar_timeout_us(0);
-    return saved_char != PICO_ERROR_TIMEOUT;
-}
-
-int getch(void)
-{
-    int c;
-    uint8_t data = 'Y';
-    if (kbhit()) {
-        data = saved_char;
-        saved_char = PICO_ERROR_TIMEOUT;
-        return data;
-    }
-    c = stdio_getchar();
-    if (c != PICO_ERROR_TIMEOUT) {
-        data = c;
-        saved_char = PICO_ERROR_TIMEOUT;
-    } else {
-        data = 'O';
-    }
-    return data;
-}
-
-void putch(uint32_t c)
-{
-    putchar_raw(c);
-}
+static int cdc_itf = 0;
 
 //
 // core0 のメインループ
@@ -124,25 +83,31 @@ __attribute__((noinline)) void __time_critical_func(core0_entry)(void)
 {
     // usb serial handling
     int c;
+    uint8_t cb;
     uint32_t data;
     uint32_t cmd;
     while (1) {
+        tud_task();
         cmd = multicore_fifo_pop_blocking();
         if (cmd & 0x200) {
             // status register read
             data = 0;
-            if (kbhit())
+            if (tud_cdc_n_available(cdc_itf) > 0)
                 data |= (1<<0);
-            if (tud_cdc_write_available() > 0)
+            if (tud_cdc_n_write_available(cdc_itf) > 0)
                 data |= (1<<1);
         } else if (cmd & 0x100) {
             // data register read
-            data = getch();
+            tud_cdc_n_read(cdc_itf, &cb, 1);
+            data = cb;
         } else {
             // data register write
-            putch(cmd);
-            data = 'Y';
+            cb = cmd;
+            tud_cdc_n_write(cdc_itf, &cb, 1);
+            tud_cdc_n_write_flush(cdc_itf);     // flush seems to be needed
+            //data = 'Y';
         }
+        tud_task();
         multicore_fifo_push_blocking(data);
     }
 
