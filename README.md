@@ -124,8 +124,8 @@ Pico/Pico2 の PIO の使い方にある程度習熟し、Z80 と WeAct RP2350B 
 
 * 40ピン DIP パッケージと同じ幅だが、ピン数は 36ピンのパッケージを用意することができた。
 
-<img width=500, src="img/r001-rp2350-zero-plus.JPEG"/><br>
-<img width=300, src="img/r002-rp2350-zero-plus-pin-assign.JPEG"/>
+<img width=500, src="./doc/img/r001-rp2350-zero-plus.JPEG"/><br>
+<img width=300, src="./doc/img/r002-rp2350-zero-plus-pin-assign.JPEG"/>
 
 詳細は、[以下のページ](./doc/RP2350A_FULLGPIO.md) を参照して欲しい。
 
