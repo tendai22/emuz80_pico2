@@ -116,3 +116,17 @@ Pico/Pico2 の PIO の使い方にある程度習熟し、Z80 と WeAct RP2350B 
 
 ソフト実装は、ブランチ `ae_rp2040` にある通りです。RP2350A と大差はないかと思っていましたが、苦労しました。詳細は、[AE-RP2040設計メモ](./doc/AE_RP2040_DESIGNMEMO.md)を参照ください。
 
+## RP2350A フルGPIO基板の作成
+
+[Waveshare RP2350-Zero](https://www.waveshare.com/rp2350-zero.htm) は、GPIO16 以外の 29本がパッドまたは端子として出ています。GPIO16 は、基板搭載のカラーLED(WS2812B)のDINにつながっているので、カラーLEDからなんとかして線を1本引き出せば GPIO 30 本すべてを使用することができます。
+
+ということで、
+
+* 40ピン DIP パッケージと同じ幅だが、ピン数は 36ピンのパッケージを用意することができた。
+
+<img width=500, src="img/r001-rp2350-zero-plus.JPEG"/><br>
+<img width=300, src="img/r002-rp2350-zero-plus-pin-assign.JPEG"/>
+
+詳細は、[以下のページ](./doc/RP2350A_FULLGPIO.md) を参照して欲しい。
+
+
