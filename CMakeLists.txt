@@ -25,48 +25,49 @@ endif()
 # ====================================================================================
 set(PICO_BOARD pico2 CACHE STRING "Board type")
 
+
 # Pull in Raspberry Pi Pico SDK (must be before project)
 include(pico_sdk_import.cmake)
 
-project(rp2350_zero_plus C CXX ASM)
+project(rp2350a_zero C CXX ASM)
 
 # Initialise the Raspberry Pi Pico SDK
 pico_sdk_init()
 
 # Add executable. Default name is the project name, version 0.1
 
-add_executable(rp2350_zero_plus emuz80_pico2.c )
+add_executable(rp2350a_zero emuz80_pico2.c )
 
-pico_set_program_name(rp2350_zero_plus "rp2350_zero_plus")
-pico_set_program_version(rp2350_zero_plus "0.1")
+pico_set_program_name(rp2350a_zero "rp2350a_zero")
+pico_set_program_version(rp2350a_zero "0.1")
 
 # copy_to_ram means bootloader copies binaries to RAM and execute it
-pico_set_binary_type(rp2350_zero_plus copy_to_ram)
+pico_set_binary_type(rp2350a_zero copy_to_ram)
 
 # Generate PIO header
-pico_generate_pio_header(rp2350_zero_plus ${CMAKE_CURRENT_LIST_DIR}/blink.pio)
+pico_generate_pio_header(rp2350a_zero ${CMAKE_CURRENT_LIST_DIR}/blink.pio)
 
 # Modify the below lines to enable/disable output over UART/USB
-pico_enable_stdio_uart(rp2350_zero_plus 0)
-pico_enable_stdio_usb(rp2350_zero_plus 1)
+pico_enable_stdio_uart(rp2350a_zero 0)
+pico_enable_stdio_usb(rp2350a_zero 1)
 
 # compiler options
-target_compile_options(rp2350_zero_plus PUBLIC -Ofast)
+target_compile_options(rp2350a_zero PUBLIC -Ofast)
 
 # Add the standard library to the build
-target_link_libraries(rp2350_zero_plus
+target_link_libraries(rp2350a_zero
         pico_stdlib
         pico_multicore)
 
 # Add the standard include files to the build
-target_include_directories(rp2350_zero_plus PRIVATE
+target_include_directories(rp2350a_zero PRIVATE
         ${CMAKE_CURRENT_LIST_DIR}
 )
 
 # Add any user requested libraries
-target_link_libraries(rp2350_zero_plus 
+target_link_libraries(rp2350a_zero 
         hardware_pio
         )
 
-pico_add_extra_outputs(rp2350_zero_plus)
+pico_add_extra_outputs(rp2350a_zero)
 
