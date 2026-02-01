@@ -250,8 +250,11 @@ __attribute__((noinline)) int __time_critical_func(main)(void)
     // PIO StateMachine(SM) initialzation
     //
     // pio_set_gpio_base should be invoked before pio_add_program
+#if defined(RP2350B)
+    printf("WARNING: GPIO_BASE is set 16\n");
     pio_set_gpio_base(pio0, 16);
     pio_set_gpio_base(pio1, 16);
+#endif
     //
     // PIO0:SM0,1
 	//   in: RD_Pin(16), count: 1
