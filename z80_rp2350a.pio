@@ -17,8 +17,6 @@
 .side_set 4 pindirs
     mov pc, pins side 0xf
     mov pc, pins side 0x0
-    mov pc, pins side 0xf
-    mov pc, pins side 0x0
 
 ;
 ; PIO0:SM2: data_out
@@ -85,7 +83,7 @@ void clockgen_program_init(PIO pio, uint sm, uint offset, uint pin, uint phase) 
     //  18.7 ... 4.0-4.17MHz (250-260ns) .... 0/1 wait in M1, 1 wait in WR, 0/1 wait in RD
     //  10.0 ... 7.1-7.6MHz (130-140ns) ... seems to work
     //   5.0 ... 14-16MHz (60-70ns) ... does not works
-    sm_config_set_clkdiv(&c, 12.0); // 12.0 ... 6.25MHz max
+    sm_config_set_clkdiv(&c, 13.0); // 12.0 ... 6.25MHz max
     pio_sm_init(pio, sm, offset, &c);
 }
 
@@ -95,7 +93,7 @@ void set_pindirs_program_init(PIO pio, uint sm, uint offset, uint data_pin, uint
     pio_sm_set_consecutive_pindirs(pio, sm, rd_pin, 1, false);
     pio_sm_config c = set_pindirs_program_get_default_config(offset);
     sm_config_set_in_pins(&c, rd_pin);
-    //sm_config_set_in_pin_count(&c, 1);    // commented out for rp2040
+    sm_config_set_in_pin_count(&c, 1);
     sm_config_set_sideset_pins(&c, data_pin);
     sm_config_set_clkdiv(&c, 1);         // 1 ... full speed 
     pio_sm_init(pio, sm, offset, &c);
@@ -118,7 +116,7 @@ void iorq_wait_program_init(PIO pio, uint sm, uint offset, uint wait_pin, uint d
     pio_sm_set_consecutive_pindirs(pio, sm, wait_pin, 1, true);
     pio_sm_config c = iorq_wait_program_get_default_config(offset);
     sm_config_set_in_pins(&c, d0_pin);
-    sm_config_set_in_pin_count(&c, 8);    // commented out for rp2040
+    sm_config_set_in_pin_count(&c, 8);
     sm_config_set_in_shift(&c, false, false, 8);
     sm_config_set_out_pins(&c, d0_pin, 8);
     sm_config_set_out_shift(&c, true, false, 8);

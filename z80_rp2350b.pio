@@ -4,9 +4,9 @@
 ; SPDX-License-Identifier: BSD-3-Clause
 ;
 ; z80_rp2350b.pio ... for RP2350B boards
-;.define IORQ_Pin 18
+.define IORQ_Pin 18
 ; z80_rp2350a.pio, z80_rp2040.pio ... for RP2350A/RP2040 boards
-.define IORQ_Pin 24
+;.define IORQ_Pin 24
 
 ;
 ; PIO0:SM0,1 ... set_pindirs
@@ -15,8 +15,6 @@
 .program set_pindirs
 .origin 0
 .side_set 4 pindirs
-    mov pc, pins side 0xf
-    mov pc, pins side 0x0
     mov pc, pins side 0xf
     mov pc, pins side 0x0
 
@@ -95,7 +93,7 @@ void set_pindirs_program_init(PIO pio, uint sm, uint offset, uint data_pin, uint
     pio_sm_set_consecutive_pindirs(pio, sm, rd_pin, 1, false);
     pio_sm_config c = set_pindirs_program_get_default_config(offset);
     sm_config_set_in_pins(&c, rd_pin);
-    //sm_config_set_in_pin_count(&c, 1);    // commented out for rp2040
+    sm_config_set_in_pin_count(&c, 1);
     sm_config_set_sideset_pins(&c, data_pin);
     sm_config_set_clkdiv(&c, 1);         // 1 ... full speed 
     pio_sm_init(pio, sm, offset, &c);
@@ -118,7 +116,7 @@ void iorq_wait_program_init(PIO pio, uint sm, uint offset, uint wait_pin, uint d
     pio_sm_set_consecutive_pindirs(pio, sm, wait_pin, 1, true);
     pio_sm_config c = iorq_wait_program_get_default_config(offset);
     sm_config_set_in_pins(&c, d0_pin);
-    sm_config_set_in_pin_count(&c, 8);    // commented out for rp2040
+    sm_config_set_in_pin_count(&c, 8);
     sm_config_set_in_shift(&c, false, false, 8);
     sm_config_set_out_pins(&c, d0_pin, 8);
     sm_config_set_out_shift(&c, true, false, 8);

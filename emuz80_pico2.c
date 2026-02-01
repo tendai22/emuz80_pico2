@@ -10,7 +10,11 @@
 // AE_RP2040 .... Akizuki Denshi AE-RP2040
 //
 // You can specify one of the three in CMakeLists.txt
-// 
+//
+#if defined(RP2350B_CoreBoard) || defined(RP2350_Zero) || defined(AE_RP2040)
+#else
+#error Either one of the following macro definition is needed, RP2350B_CoreBoard|RP2350_Zero|AE_RP2040
+#endif
 #include <stdio.h>
 #include <string.h>
 #include "pico/stdlib.h"
@@ -27,6 +31,7 @@
 //
 // New Pin Assigns, avoid using Pin23 (which we cannot use on WeAct RP2350B CoreBoard)
 #if defined(RP2350B_CoreBoard)
+#define ADDR_MASK 0xffff
 #define D0_Pin 24
 #define RD_Pin 16
 #define WR_Pin 17
@@ -40,10 +45,33 @@
 #define TEST_Pin 45
 #endif
 #if defined(RP2350_Zero)
+#define ADDR_MASK 0xffff
+#define D0_Pin 16
+#define RD_Pin 25
+#define WR_Pin 26
+#define IORQ_Pin 24
+#define WAIT_Pin 27
+#define CLK_Pin  29
+#define RESET_Pin 28
+//#define TEST_Pin 15
+#if defined(TEST_Pin)
+#define ADDR_MASK 0x7fff
+#endif
 #endif
 #if defined(AE_RP2040)
+#define ADDR_MASK 0xffff
+#define D0_Pin 16
+#define RD_Pin 25
+#define WR_Pin 26
+#define IORQ_Pin 24
+#define WAIT_Pin 27
+#define CLK_Pin  29
+#define RESET_Pin 28
+//#define TEST_Pin 15
+#if defined(TEST_Pin)
+#define ADDR_MASK 0x7fff
 #endif
-
+#endif
 
 #define FLAG_VALUE 123
 
@@ -53,11 +81,26 @@
 
 #include "blink.pio.h"
 
+#if defined(TEST_Pin)
 static int toggle_value = 1;
+#if defined(RP2350B)
 #define TOGGLE() do {    gpio_xor_mask64(((uint64_t)1)<<TEST_Pin); } while(0)
 #define TOGGLE1() do {    gpio_xor_mask64(((uint64_t)1)<<TEST_Pin); sleep_us(1); } while(0)
 //#define TOGGLE() do {    (*(volatile uint32_t *)&(sio_hw->gpio_hi_togl)) = 1; } while(0)
 //#define TOGGLE() do { gpio_put(TEST_Pin, (toggle_value ^= 1));    } while(0)
+#endif
+#if defined(RP2350A)
+#define TOGGLE() do {    gpio_xor_mask(((uint32_t)1)<<TEST_Pin); } while(0)
+#define TOGGLE1() do {    gpio_xor_mask(((uint32_t)1)<<TEST_Pin); sleep_us(1); } while(0)
+#endif
+#if defined(RP2040)
+#define TOGGLE() do {    gpio_xor_mask(((uint32_t)1)<<TEST_Pin); } while(0)
+#define TOGGLE1() do {    gpio_xor_mask(((uint32_t)1)<<TEST_Pin); sleep_us(1); } while(0)
+#endif
+#else   //defined(TEST_Pin)
+#define TOGGLE()
+#define TOGGLE1()
+#endif //defined(TEST_Pin)
 
 void gpio_out_init(uint gpio, bool value) {
     gpio_set_dir(gpio, GPIO_OUT);
@@ -156,14 +199,15 @@ loop:
         // All other cycles, except neither IORQ nor WR.
         // output mem[addr] asynchronously
         //TOGGLE();
-        pio_sm_put(pio0, 2, mem[port & 0xffff]);
+        pio_sm_put(pio0, 2, mem[port & ADDR_MASK]);
         //TOGGLE();
     }
+    port = gpio_get_all();      // re-read to confirm status lines
     if ((port & ((1<<IORQ_Pin)|(1<<WR_Pin))) == (1<<IORQ_Pin)) {
         // Memory Write Cycle
         // store data to mem[addr], asynchronously
         TOGGLE();
-        mem[port & 0xffff] = (port >> D0_Pin);
+        mem[port & ADDR_MASK] = (port >> D0_Pin);
         TOGGLE();
         goto loop;
     }
@@ -217,15 +261,19 @@ __attribute__((noinline)) int __time_critical_func(main)(void)
     // GPIO Out
     gpio_out_init(WAIT_Pin, true);
     gpio_out_init(RESET_Pin, false);
+#if defined(BUSRQ_Pin)
     gpio_out_init(BUSRQ_Pin, true);
+#endif
+#if defined(INT_Pin)
     gpio_out_init(INT_Pin, false);      // INT Pin has an inverter, so negate signal is needed
-
+#endif
+#if defined(TEST_Pin)
     gpio_out_init(TEST_Pin, false);
-
+#endif
     // GPIO In
     // MREQ, IORQ, RD, RFSH, M1 are covered by PIO
     //
-    gpio_init_mask(0xffff);     // A0-A15 input 
+    gpio_init_mask(ADDR_MASK);     // A0-A15 input 
     //gpio_init(BUSAK_Pin);
     //gpio_init(MREQ_Pin);
     gpio_init(IORQ_Pin);
@@ -234,8 +282,8 @@ __attribute__((noinline)) int __time_critical_func(main)(void)
     gpio_init(WR_Pin);
 
     // PIO Blinking example
-    PIO pio_clock = pio0;
-    PIO pio_wait = pio1;
+    //PIO pio_clock = pio0;
+    //PIO pio_wait = pio1;
     //uint sm_clock = 0;
 
 
@@ -250,9 +298,11 @@ __attribute__((noinline)) int __time_critical_func(main)(void)
     //
     // PIO StateMachine(SM) initialzation
     //
+#if defined(RP2350B)
     // pio_set_gpio_base should be invoked before pio_add_program
     pio_set_gpio_base(pio0, 16);
     pio_set_gpio_base(pio1, 16);
+#endif //defined(RP2350B)
     //
     // PIO0:SM0,1
 	//   in: RD_Pin(16), count: 1
@@ -289,6 +339,17 @@ __attribute__((noinline)) int __time_critical_func(main)(void)
 	//pio_gpio_init(pio1, MREQ_Pin);
 	pio_gpio_init(pio1, IORQ_Pin);
 	pio_gpio_init(pio1, WAIT_Pin);
+
+    // input override
+    // These should be below pio_gpio_init
+#if defined(RP2040)
+    for (int i = WAIT_Pin; i < 30 ; i++) {
+        printf ("inover: %d\n", i);
+        gpio_set_input_enabled(i, false);
+        gpio_set_inover(i, GPIO_OVERRIDE_LOW);
+        gpio_set_slew_rate(i, GPIO_SLEW_RATE_FAST);
+    }
+#endif
 
     // mem clear
     for (int i = 0 ; i < sizeof mem; ++i)
@@ -433,3 +494,11 @@ __attribute__((noinline)) int __time_critical_func(main)(void)
     core0_entry();
     // NOT REACHED
 }
+
+//
+// Insufficient definition warning
+//
+#if defined(RP2350B_CoreBoard) || defined(RP2350_Zero) || defined(AE_RP2040)
+#else
+#error Either one of the following macro definition is needed, RP2350B_CoreBoard, RP2350_Zero, or AE_RP2040
+#endif
