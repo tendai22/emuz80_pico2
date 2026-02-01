@@ -4,7 +4,7 @@
 ; SPDX-License-Identifier: BSD-3-Clause
 ;
 
-.define IORQ_Pin 18
+.define IORQ_Pin 24
 
 ; SET pin 0 should be mapped to your LED GPIO
 

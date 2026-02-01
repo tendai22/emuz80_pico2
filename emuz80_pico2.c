@@ -13,6 +13,9 @@
 // before #include "blink.pio.h"
 //
 // New Pin Assigns, avoid using Pin23 (which we cannot use on WeAct RP2350B CoreBoard)
+// RP2350A
+#if 0
+// RP2350B pin assign
 #define D0_Pin 24
 #define RD_Pin 16
 #define WR_Pin 17
@@ -24,16 +27,31 @@
 #define RESET_Pin 42
 #define BUSRQ_Pin 43
 #define TEST_Pin 45
+#else   // for RP2350A, RP2040 pin assign
+#define D0_Pin 16
+#define RD_Pin 25
+#define WR_Pin 26
+#define IORQ_Pin 24
+#define WAIT_Pin 27
+//#define M1_Pin   20
+#define CLK_Pin  29
+//#define INT_Pin  41
+#define RESET_Pin 28
+//#define BUSRQ_Pin 43
+//#define TEST_Pin 45
+#endif
 
 #define FLAG_VALUE 123
 
 #include "blink.pio.h"
 
+#if defined(TEST_Pin)
 static int toggle_value = 1;
 #define TOGGLE() do {    gpio_xor_mask64(((uint64_t)1)<<TEST_Pin); } while(0)
 #define TOGGLE1() do {    gpio_xor_mask64(((uint64_t)1)<<TEST_Pin); sleep_us(1); } while(0)
 //#define TOGGLE() do {    (*(volatile uint32_t *)&(sio_hw->gpio_hi_togl)) = 1; } while(0)
 //#define TOGGLE() do { gpio_put(TEST_Pin, (toggle_value ^= 1));    } while(0)
+#endif
 
 void gpio_out_init(uint gpio, bool value) {
     gpio_set_dir(gpio, GPIO_OUT);
@@ -138,9 +156,9 @@ loop:
     if ((port & ((1<<IORQ_Pin)|(1<<WR_Pin))) == (1<<IORQ_Pin)) {
         // Memory Write Cycle
         // store data to mem[addr], asynchronously
-        TOGGLE();
+        //TOGGLE();
         mem[port & 0xffff] = (port >> D0_Pin);
-        TOGGLE();
+        //TOGGLE();
         goto loop;
     }
     port = gpio_get_all();      // re-read to confirm status lines
@@ -193,10 +211,15 @@ __attribute__((noinline)) int __time_critical_func(main)(void)
     // GPIO Out
     gpio_out_init(WAIT_Pin, true);
     gpio_out_init(RESET_Pin, false);
+#if defined(BUSRQ_Pin)
     gpio_out_init(BUSRQ_Pin, true);
+#endif
+#if defined(INT_Pin)
     gpio_out_init(INT_Pin, false);      // INT Pin has an inverter, so negate signal is needed
-
+#endif
+#if defined(TEST_Pin)
     gpio_out_init(TEST_Pin, false);
+#endif
 
     // GPIO In
     // MREQ, IORQ, RD, RFSH, M1 are covered by PIO
