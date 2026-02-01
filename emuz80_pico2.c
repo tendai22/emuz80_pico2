@@ -1,3 +1,16 @@
+// license: BSD 3-Clause License
+// copyright-holders: Norihiro Kumagai
+//
+// emuz80_pico2.c ... A Z80 manipulator on RP2350A/B/RP2020
+//
+
+// Three configuration macros
+// RP2350B_CoreBoard ... WeAct RP2350B_CoreBoard
+// RP2350_Zero ... Waveshare RP2350-Zero/One
+// AE_RP2040 .... Akizuki Denshi AE-RP2040
+//
+// You can specify one of the three in CMakeLists.txt
+// 
 #include <stdio.h>
 #include <string.h>
 #include "pico/stdlib.h"
@@ -13,6 +26,7 @@
 // before #include "blink.pio.h"
 //
 // New Pin Assigns, avoid using Pin23 (which we cannot use on WeAct RP2350B CoreBoard)
+#if defined(RP2350B_CoreBoard)
 #define D0_Pin 24
 #define RD_Pin 16
 #define WR_Pin 17
@@ -24,8 +38,18 @@
 #define RESET_Pin 42
 #define BUSRQ_Pin 43
 #define TEST_Pin 45
+#endif
+#if defined(RP2350_Zero)
+#endif
+#if defined(AE_RP2040)
+#endif
+
 
 #define FLAG_VALUE 123
+
+#if defined(RP2040)
+#define sm_config_set_in_pin_count(c, num)
+#endif
 
 #include "blink.pio.h"
 

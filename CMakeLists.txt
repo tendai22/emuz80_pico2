@@ -52,6 +52,9 @@ pico_enable_stdio_usb(emuz80_pico2 1)
 
 # compiler options
 target_compile_options(emuz80_pico2 PUBLIC -Ofast)
+# for WeAct RP2350B CoreBoard
+target_compile_options(emuz80_pico2 PUBLIC -DRP2350B_CoreBoard
+                PUBLIC -DRP2350B)
 
 # Add the standard library to the build
 target_link_libraries(emuz80_pico2
