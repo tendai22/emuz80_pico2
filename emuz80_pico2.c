@@ -10,7 +10,7 @@
 // General Configuration
 //
 // Use RP2040, GPIO0-29
-#define GPIO_32
+//#define GPIO_32
 
 //
 // USB CDC
@@ -24,7 +24,7 @@
 //
 
 //
-// AE_RP2040 board
+// AE_RP2040 board / RP2350-Zero-plus board
 //
 #define D0_Pin 16
 #define ADDR_MASK 0xffff
@@ -164,7 +164,7 @@ loop:
     // IN AE-RP2040, this 2nd port reading is needed here.
     // Adding 1kohm resister on WR line so as to delay and give an advance
     // to IORQ, removing 'port = gpio_get_all()' and some speed-up is achieved.
-    //port = gpio_get_all();      // re-read to confirm status lines
+    port = gpio_get_all();      // re-read to confirm status lines
     if ((port & ((1<<IORQ_Pin)|(1<<WR_Pin))) == (1<<IORQ_Pin)) {
         // Memory Write Cycle
         // store data to mem[addr], asynchronously
@@ -316,16 +316,17 @@ __attribute__((noinline)) int __time_critical_func(main)(void)
 	pio_gpio_init(pio1, IORQ_Pin);
 
 	pio_gpio_init(pio1, WAIT_Pin);
-
+#if 0
     // input override
     // These should be below pio_gpio_init
+    // These codes are not needed for RP2350A/B
     for (int i = WAIT_Pin; i < 30 ; i++) {
         printf ("inover: %d\n", i);
         gpio_set_input_enabled(i, false);
         gpio_set_inover(i, GPIO_OVERRIDE_LOW);
         gpio_set_slew_rate(i, GPIO_SLEW_RATE_FAST);
     }
-
+#endif
 
     //
     // tinyUSB CDC check

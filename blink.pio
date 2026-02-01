@@ -4,6 +4,12 @@
 ; SPDX-License-Identifier: BSD-3-Clause
 ;
 
+;
+; GPIO defines
+;
+
+.define IORQ_Pin 24
+
 ; SET pin 0 should be mapped to your LED GPIO
 
 ;
@@ -47,11 +53,11 @@
 .program iorq_wait
     set pins, 1
 .wrap_target
-    wait 0 gpio 24     ; IORQ_Pin(24)
-    set pins, 0         ; WAIT_PIn(27) Low
-    pull                ; wait for MainCPU work done
-    set pins, 1         ; WAIT_Pin(27) High
-    wait 1 gpio 24     ; IORQ_Pin(24)
+    wait 0 gpio IORQ_Pin    ; IORQ_Pin(24)
+    set pins, 0             ; WAIT_PIn(27) Low
+    pull                    ; wait for MainCPU work done
+    set pins, 1             ; WAIT_Pin(27) High
+    wait 1 gpio IORQ_Pin    ; IORQ_Pin(24)
     push
 .wrap
 
@@ -81,7 +87,7 @@ void clockgen_program_init(PIO pio, uint sm, uint offset, uint pin, uint phase) 
     //  18.7 ... 4.0-4.17MHz (250-260ns) .... 0/1 wait in M1, 1 wait in WR, 0/1 wait in RD
     //  10.0 ... 7.1-7.6MHz (130-140ns) ... seems to work
     //   5.0 ... 14-16MHz (60-70ns) ... does not works
-    sm_config_set_clkdiv(&c, 15.0); // 16.0 ... 3.90MHz on RP2040(125MHz clock)
+    sm_config_set_clkdiv(&c, 13.0); // 16.0 ... 3.90MHz on RP2040(125MHz clock)
                                     // 15.0 ... 4.17MHz on RP2040(125MHz clock)
     pio_sm_init(pio, sm, offset, &c);
 }
@@ -93,7 +99,7 @@ void set_pindirs_program_init(PIO pio, uint sm, uint offset, uint data_pin, uint
     pio_sm_set_consecutive_pindirs(pio, sm, rd_pin, 1, false);
     pio_sm_config c = set_pindirs_program_get_default_config(offset);
     sm_config_set_in_pins(&c, rd_pin);
-    //sm_config_set_in_pin_count(&c, 1);    // RP2040 has no IN_PIN_COUNT
+    sm_config_set_in_pin_count(&c, 1);    // RP2040 has no IN_PIN_COUNT
     sm_config_set_sideset_pins(&c, data_pin);
     sm_config_set_clkdiv(&c, 1);         // 1 ... full speed 
     pio_sm_init(pio, sm, offset, &c);
