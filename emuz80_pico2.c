@@ -14,11 +14,11 @@
 //
 // New Pin Assigns, avoid using Pin23 (which we cannot use on WeAct RP2350B CoreBoard)
 #define D0_Pin 24
-#define RD_Pin 16
-#define WR_Pin 17
-#define IORQ_Pin 18
-#define WAIT_Pin 19
-#define M1_Pin   20
+#define RD_Pin 20
+#define WR_Pin 21
+#define IORQ_Pin 22
+#define WAIT_Pin 16
+//#define M1_Pin   XX
 #define CLK_Pin  40
 #define INT_Pin  41
 #define RESET_Pin 42
@@ -135,6 +135,7 @@ loop:
         pio_sm_put(pio0, 2, mem[port & 0xffff]);
         //TOGGLE();
     }
+    port = gpio_get_all();      // re-read to confirm status lines
     if ((port & ((1<<IORQ_Pin)|(1<<WR_Pin))) == (1<<IORQ_Pin)) {
         // Memory Write Cycle
         // store data to mem[addr], asynchronously
@@ -143,7 +144,7 @@ loop:
         TOGGLE();
         goto loop;
     }
-    port = gpio_get_all();      // re-read to confirm status lines
+    //port = gpio_get_all();      // re-read to confirm status lines
     if ((port & (1<<IORQ_Pin)) == 0) {
         if ((port & (1<<RD_Pin)) == 0) {
             // IO Read cycle
@@ -193,8 +194,12 @@ __attribute__((noinline)) int __time_critical_func(main)(void)
     // GPIO Out
     gpio_out_init(WAIT_Pin, true);
     gpio_out_init(RESET_Pin, false);
+#if defined(BUSRQ_Pin)
     gpio_out_init(BUSRQ_Pin, true);
-    gpio_out_init(INT_Pin, false);      // INT Pin has an inverter, so negate signal is needed
+#endif
+#if defined(INT_Pin)
+    gpio_out_init(INT_Pin, true);
+#endif
 
     gpio_out_init(TEST_Pin, false);
 
