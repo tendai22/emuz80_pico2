@@ -3,10 +3,10 @@
 ;
 ; SPDX-License-Identifier: BSD-3-Clause
 ;
-; z80_rp2350b.pio ... for RP2350B boards
-.define IORQ_Pin 18
-; z80_rp2350a.pio, z80_rp2040.pio ... for RP2350A/RP2040 boards
-;.define IORQ_Pin 24
+
+.define IORQ_Pin 22
+
+; SET pin 0 should be mapped to your LED GPIO
 
 ;
 ; PIO0:SM0,1 ... set_pindirs
