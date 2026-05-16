@@ -13,7 +13,9 @@ extern __attribute__((noinline)) void __time_critical_func(emuz80_core1_entry)(v
 extern void emuz80_unreset(void);
 extern void gpio_out_init(uint gpio, bool value);
 
-extern uint8_t mem[];
+extern uint8_t __aligned(65536) mem[];
+
+
 
 // a magic number for core1/core2 queue
 #define FLAG_VALUE 123

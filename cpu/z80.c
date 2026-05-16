@@ -18,6 +18,7 @@
 #include "emuz80.h"
 #include "z80_rp2350b.pio.h"
 
+extern volatile int rx_rdy, tx_rdy, rx_data, tx_data, txbuf_full;
 //
 // No `sm_config_set_in_pin_count()` is provided for RP2040
 // So, here we have a stub function
@@ -178,15 +179,14 @@ loop:
             if (addr == 1)
             {
                 // read status register
-                multicore_fifo_push_blocking(0x200); // read status cmd 0x200
-                status = multicore_fifo_pop_blocking();
+                status = (rx_rdy | tx_rdy);
                 pio_sm_put(pio0, 2, status);
             }
             else if (addr == 0)
             {
-                uint8_t data = 0;
-                multicore_fifo_push_blocking(0x100); // read rx data cmd 0x100
-                data = multicore_fifo_pop_blocking();
+                // read data register
+                uint8_t data = rx_data;
+                rx_rdy = 0;
                 pio_sm_put(pio0, 2, data);
             }
         }
@@ -198,8 +198,8 @@ loop:
             if (addr == 0)
             {
                 // UART DR
-                multicore_fifo_push_blocking(data & 0xff); // write tx data cmd 0-0xff
-                multicore_fifo_pop_blocking();
+                tx_data = data;
+                txbuf_full = 1;
             }
         }
         pio_sm_put(pio1, 3, 0);       // notify IO process finished to the state machine

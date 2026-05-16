@@ -33,7 +33,7 @@ void gpio_out_init(uint gpio, bool value) {
     gpio_set_function(gpio, GPIO_FUNC_SIO);
 }
 
-uint8_t mem[65536];
+uint8_t __aligned(65536) mem[65536];
 
 uint8_t uart_test[] = {
 0x31, 0x00, 0x80,   // LD SP, 0x8000
@@ -63,6 +63,15 @@ uint8_t uart_test[] = {
 //
 static int cdc_itf = 0;
 
+// 
+// serial status registers
+//
+volatile int tx_rdy = 0;
+volatile int rx_rdy = 0;
+volatile int tx_data = 0;
+volatile int rx_data = 0;
+volatile int txbuf_full = 0;
+
 //
 // core0 のメインループ
 // この関数からリターンしない。
@@ -75,27 +84,21 @@ __attribute__((noinline)) void __time_critical_func(emuz80_core0_entry)(void)
     uint32_t cmd;
     while (1) {
         tud_task();
-        cmd = multicore_fifo_pop_blocking();
-        if (cmd & 0x200) {
-            // status register read
-            data = 0;
-            if (tud_cdc_n_available(cdc_itf) > 0)
-                data |= (1<<0);
-            if (tud_cdc_n_write_available(cdc_itf) > 0)
-                data |= (1<<1);
-        } else if (cmd & 0x100) {
-            // data register read
+        if (rx_rdy == 0 && tud_cdc_n_available(cdc_itf) > 0) {
             tud_cdc_n_read(cdc_itf, &cb, 1);
-            data = cb;
-        } else {
-            // data register write
-            cb = cmd;
+            rx_data = cb;
+            rx_rdy = 1;
+        }
+        if (tx_rdy == 0 && tud_cdc_n_write_available(cdc_itf) > 0) {
+            tx_rdy = 2;
+        }
+        if (tx_rdy && txbuf_full) {
+            cb = tx_data;
             tud_cdc_n_write(cdc_itf, &cb, 1);
             tud_cdc_n_write_flush(cdc_itf);     // flush seems to be needed
-            //data = 'Y';
+            txbuf_full = 0;
+            tx_rdy = 0;
         }
-        tud_task();
-        multicore_fifo_push_blocking(data);
     }
 
 }
