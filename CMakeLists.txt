@@ -32,14 +32,14 @@ endif()
 set (EMUZ80_CONFIG z80_rp2350b)
 
 # config variable definitions
-if (EQUAL(${EMUZ80_CONFIG},"z80_rp2350b")
+if ("${EMUZ80_CONFIG}" STREQUAL "z80_rp2350b")
     set(emuz80_project ${EMUZ80_CONFIG})
     set(emuz80_board "pimoroni_pga2350")
     set(emuz80_main_c "emuz80_pico2.c")
     set(emuz80_cpu_c "cpu/z80.c")
     set(emuz80_conf_h "conf/z80_rp2350b.h")
     set(emuz80_pio_pio "pio/z80_rp2350b.pio")
-    set(emuz80_macro_defs "-DRP2350B_Coreboard -DRP2350B")
+    set(emuz80_macro_defs -DRP2350B_CoreBoard -DRP2350B)
 endif()
 
 # configuration definitions

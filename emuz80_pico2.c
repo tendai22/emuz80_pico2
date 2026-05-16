@@ -100,6 +100,7 @@ __attribute__((noinline)) void __time_critical_func(emuz80_core0_entry)(void)
 
 }
 
+#define EMUBASIC_IO
 
 __attribute__((noinline)) int __time_critical_func(main)(void) 
 {
@@ -117,9 +118,12 @@ __attribute__((noinline)) int __time_critical_func(main)(void)
         mem[i] = 0;
     // copy prog1
 #ifdef EMUBASIC_IO
+    printf("loading: EMUBASIC_IO\n");
+#include "emubasic_io.h"
     memcpy(&mem[0], &emuz80_binary[0], sizeof emuz80_binary);
 #endif
 #ifdef EMUBASIC
+    printf("loading: EMUBASIC\n")
     memcpy(&mem[0], &emuz80_binary[0], sizeof emuz80_binary);
 #endif
 
