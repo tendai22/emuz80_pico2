@@ -1327,5 +1327,28 @@ Serial Echoback プログラムでも 'F' が入った。このプログラム�
 
 in 01H で 4E を返す時がある。4Eなら下2ビットが意図通りなのでたまたま問題ないが。
 
+## 2026/5/16: 久しぶりに再開
 
+developブランチで、CMakeList.txt の条件コンパイル整備中。
+ようやくビルドできるようになった。
+
+```
+# config variable definitions
+if ("${EMUZ80_CONFIG}" STREQUAL "z80_rp2350b")
+    set(emuz80_project ${EMUZ80_CONFIG})
+    set(emuz80_board "pimoroni_pga2350")
+    set(emuz80_main_c "emuz80_pico2.c")
+    set(emuz80_cpu_c "cpu/z80.c")
+    set(emuz80_conf_h "conf/z80_rp2350b.h")
+    set(emuz80_pio_pio "pio/z80_rp2350b.pio")
+    set(emuz80_macro_defs -DRP2350B_CoreBoard -DRP2350B)
+endif()
+```
+
+* STREQUAL で文字列比較する
+* emuz80_macro_defs の引数を二重引用符で括ってはいけない。
+
+あと、
+
+* マクロ EMUBASIC_IO の定義を ソースコード内に埋めたまま。これは CMakeList.txt 内部で指定したい。
 
