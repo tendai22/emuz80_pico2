@@ -67,35 +67,98 @@ void emuz80_pio_init() {
 #if defined(RP2350B)
     // pio_set_gpio_base should be invoked before pio_add_program
     pio_set_gpio_base(pio0, 16);
-    pio_set_gpio_base(pio1, 16);
+    //pio_set_gpio_base(pio1, 16);
 #endif //defined(RP2350B)
     //
     // PIO0:SM0,1
 	//   in: RD_Pin(16), count: 1
 	//   sideset: D0_Pin(24),D4_Pin(28), count: 4
+    pio_sm_config c;
     printf("---start---\n");
 	offset1 = pio_add_program(pio0, &set_pindirs_program);
     printf("set_pindir: %d\n", offset1);
-	set_pindirs_program_init(pio0, 0, offset1, D0_Pin, RD_Pin);
-	set_pindirs_program_init(pio0, 1, offset1, D0_Pin + 4, RD_Pin);
+	//set_pindirs_program_init(pio0, 0, offset1, D0_Pin, RD_Pin);
+	//   in: RD_Pin(16), count: 1
+	//   sideset: D0_Pin(24),D4_Pin(28), count: 4
+    pio_sm_set_consecutive_pindirs(pio0, 0, RD_Pin, 1, false);
+    c = set_pindirs_program_get_default_config(offset1);
+    sm_config_set_in_pins(&c, RD_Pin);
+    sm_config_set_in_pin_count(&c, 1);
+    sm_config_set_sideset_pins(&c, D0_Pin);
+    sm_config_set_clkdiv(&c, 1);         // 1 ... full speed 
+    pio_sm_init(pio0, 0, offset1, &c);
+
+    //set_pindirs_program_init(pio0, 1, offset1, D0_Pin + 4, RD_Pin);
+	//   in: RD_Pin(16), count: 1
+	//   sideset: D0_Pin(24),D4_Pin(28), count: 4
+    pio_sm_set_consecutive_pindirs(pio0, 1, RD_Pin, 1, false);
+    c = set_pindirs_program_get_default_config(offset1);
+    sm_config_set_in_pins(&c, RD_Pin);
+    sm_config_set_in_pin_count(&c, 1);
+    sm_config_set_sideset_pins(&c, D0_Pin + 4);
+    sm_config_set_clkdiv(&c, 1);         // 1 ... full speed 
+    pio_sm_init(pio0, 1, offset1, &c);
 
 	// PIO0:SM2: data_out
 	//	 OUT: D0_Pin(24), count: 8
     offset1 = pio_add_program(pio0, &data_out_program);
-    data_out_program_init(pio0, 2, offset1, D0_Pin);
+    //data_out_program_init(pio0, 2, offset1, D0_Pin);
+	//	 OUT: D0_Pin(24), count: 8
+    pio_sm_set_consecutive_pindirs(pio0, 2, D0_Pin, 8, true);
+    c = data_out_program_get_default_config(offset1);
+    sm_config_set_out_pins(&c, D0_Pin, 8);
+    sm_config_set_out_shift(&c, true, true, 8);
+    sm_config_set_clkdiv(&c, 1);         // 1 ... full speed 
+    pio_sm_init(pio0, 2, offset1, &c);
     printf("data_out = %d\n", offset1);
 
     // PIO0:SM3 ... two/one phase clock generator(program clockgen)
 	// 	 SET: BASE: 40(CLK_Pin, inverted), 41(INT_Pin, inverted)
     offset1 = pio_add_program(pio0, &clockgen_program);
     printf("clockgen: %d\n", offset1);
-    clockgen_program_init(pio0, 3, offset1, CLK_Pin, 1);
+    //clockgen_program_init(pio0, 3, offset1, CLK_Pin, 1);
+    int phase = 1;
+    pio_gpio_init(pio0, CLK_Pin);
+    if (phase == 2)
+        pio_gpio_init(pio0, CLK_Pin + 1);
+    pio_sm_set_consecutive_pindirs(pio0, 3, CLK_Pin, phase, true);
+    c = clockgen_program_get_default_config(offset1);
+    // set_set_pin_base should have been adjusted by pio->gpiobase
+    // so far not so in set_set_pin_base();
+    sm_config_set_set_pins(&c, CLK_Pin, phase);
+    // two-phase: (4 instruction loop)
+    //  16.0 ... 2.33MHz (420ns/cycle)
+    //   9.42 ... 4.0MHz  (250ns/cycle)
+    // single clock: (2 instruction loop)
+    //  50.0 ... 1.5MHz (660-670ns) 
+    //  30.0 ... 2.5MHz (400ns) ... no wait, 
+    //  18.7 ... 4.0-4.17MHz (250-260ns) .... 0/1 wait in M1, 1 wait in WR, 0/1 wait in RD
+    //  10.0 ... 7.1-7.6MHz (130-140ns) ... seems to work
+    //   5.0 ... 14-16MHz (60-70ns) ... does not works
+    sm_config_set_clkdiv(&c, 18); // 12.0 ... 6.25MHz max
+    pio_sm_init(pio0, 3, offset1, &c);
+
 
     // PIO1: SM3 ... IO cycle WAIT handler
     //   SET: BASE: 19(WAIT_Pin)
     //   wait: 18(IORQ_Pin)
     offset1 = pio_add_program(pio1, &iorq_wait_program);
-    iorq_wait_program_init(pio1, 3, offset1, WAIT_Pin, D0_Pin);
+    //iorq_wait_program_init(pio1, 3, offset1, WAIT_Pin, D0_Pin);
+	//   IN: IORQ_Pin(18), count 1
+	//	 SET: WAIT_Pin(19), count: 1
+    //pio_sm_set_consecutive_pindirs(pio, sm, iorq_pin, 1, false);
+    pio_sm_set_consecutive_pindirs(pio1, 3, WAIT_Pin, 1, true);
+    c = iorq_wait_program_get_default_config(offset1);
+    sm_config_set_in_pins(&c, D0_Pin);
+    sm_config_set_in_pin_count(&c, 8);
+    sm_config_set_in_shift(&c, false, false, 8);
+    sm_config_set_out_pins(&c, D0_Pin, 8);
+    sm_config_set_out_shift(&c, true, false, 8);
+    sm_config_set_set_pins(&c, WAIT_Pin, 1);
+    sm_config_set_set_pin_count(&c, 1);
+    sm_config_set_clkdiv(&c, 1);         // 1 ... full speed 
+    pio_sm_init(pio1, 3, offset1, &c);
+
     printf("iorq_wait = %d\n", offset1);
 
     // PIO1: pin assign
