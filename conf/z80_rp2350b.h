@@ -11,6 +11,7 @@
 #if !defined(__Z80_RP2350B_H)
 #if defined(RP2350B_CoreBoard)
 #define ADDR_MASK 0xffff
+#define A0_Pin 0
 #define D0_Pin 24
 #define RD_Pin 20
 #define WR_Pin 21

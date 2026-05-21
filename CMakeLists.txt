@@ -85,6 +85,7 @@ target_compile_options(emuz80_pico2 PUBLIC ${emuz80_macro_defs})
 # Add the standard library to the build
 target_link_libraries(emuz80_pico2
         pico_stdlib
+        hardware_dma
         pico_multicore)
 
 # Add the standard include files to the build

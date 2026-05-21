@@ -103,7 +103,7 @@ __attribute__((noinline)) void __time_critical_func(emuz80_core0_entry)(void)
 
 }
 
-#define EMUBASIC_IO
+//#define EMUBASIC_IO
 
 __attribute__((noinline)) int __time_critical_func(main)(void) 
 {
@@ -115,6 +115,7 @@ __attribute__((noinline)) int __time_critical_func(main)(void)
     // Z80 Input pin initialize
     emuz80_gpio_init();
     emuz80_pio_init();
+    emuz80_dma_init();
 
     // mem clear
     for (int i = 0 ; i < sizeof mem; ++i)
@@ -146,9 +147,9 @@ __attribute__((noinline)) int __time_critical_func(main)(void)
     //
     // Z80 test codes
     // 
-#if 0
+#if 1
     // halt
-    mem[2] = 0x76;
+    mem[0] = 0x76;
 #endif
 #if 0
     // jr loop

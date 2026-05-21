@@ -9,6 +9,7 @@
 // external functions
 extern void emuz80_gpio_init(void);
 extern void emuz80_pio_init(void);
+extern void emuz80_dma_init(void);
 extern __attribute__((noinline)) void __time_critical_func(emuz80_core1_entry)(void);
 extern void emuz80_unreset(void);
 extern void gpio_out_init(uint gpio, bool value);
