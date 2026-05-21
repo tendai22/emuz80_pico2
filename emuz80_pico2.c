@@ -147,11 +147,11 @@ __attribute__((noinline)) int __time_critical_func(main)(void)
     //
     // Z80 test codes
     // 
-#if 1
+#if 0
     // halt
     mem[0] = 0x76;
 #endif
-#if 0
+#if 1
     // jr loop
     mem[0] = 0x18;
     mem[1] = 0xfe;
@@ -245,7 +245,7 @@ __attribute__((noinline)) int __time_critical_func(main)(void)
     sleep_us(2);
 
     // start target CPU
-    emuz80_unreset();
+    //emuz80_unreset();
     // start peripheral emulation loop
     emuz80_core0_entry();
     // NOT REACHED

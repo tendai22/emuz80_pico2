@@ -82,15 +82,13 @@ void emuz80_pio_init() {
     printf("---start---\n");
 	offset1 = pio_add_program(pio0, &ram_read_program);
     printf("ram_read: %d\n", offset1);
-    //pio_sm_set_consecutive_pindirs(pio0, 0, RD_Pin, 1, false);
     pio_sm_set_consecutive_pindirs(pio0, 0, A0_Pin, 21, false);
     c = ram_read_program_get_default_config(offset1);
     sm_config_set_in_pins(&c, A0_Pin);
     sm_config_set_in_pin_count(&c, 16);
     sm_config_set_in_shift(&c, false, true, 16);    // 16bit autopush
     sm_config_set_out_pins(&c, D0_Pin, 8);
-    //sm_config_set_out_pin_count(&c, 8);
-    sm_config_set_out_shift(&c, true, false, 8);    // 8bit no-autopush
+    sm_config_set_out_shift(&c, true, true, 8);    // 8bit autopull
     sm_config_set_jmp_pin(&c, RD_Pin);
     sm_config_set_clkdiv(&c, 1);         // 1 ... full speed 
     pio_sm_init(pio0, 0, offset1, &c);
@@ -148,7 +146,7 @@ void emuz80_pio_init() {
     //  18.7 ... 4.0-4.17MHz (250-260ns) .... 0/1 wait in M1, 1 wait in WR, 0/1 wait in RD
     //  10.0 ... 7.1-7.6MHz (130-140ns) ... seems to work
     //   5.0 ... 14-16MHz (60-70ns) ... does not works
-    sm_config_set_clkdiv(&c, 30000); // 12.0 ... 6.25MHz max
+    sm_config_set_clkdiv(&c, 10000); // 12.0 ... 6.25MHz max
     pio_sm_init(pio1, 2, offset1, &c);
 
 
@@ -166,7 +164,7 @@ void emuz80_pio_init() {
     sm_config_set_in_pin_count(&c, 8);
     sm_config_set_in_shift(&c, false, false, 8);
     sm_config_set_out_pins(&c, D0_Pin, 8);
-    sm_config_set_out_shift(&c, true, false, 8);
+    sm_config_set_out_shift(&c, false, false, 8);
     sm_config_set_set_pins(&c, WAIT_Pin, 1);
     sm_config_set_set_pin_count(&c, 1);
     sm_config_set_clkdiv(&c, 1);         // 1 ... full speed 
@@ -199,21 +197,21 @@ void emuz80_pio_init() {
     pio_sm_set_enabled(pio0, 2, true);  // ram_write_data
     pio_sm_set_enabled(pio1, 2, true);  // clockgen
     // need starting clock before iorq_wait start
-    sleep_us(10);
+    //sleep_us(10);
     pio_sm_set_enabled(pio1, 3, true);  // iorq_wait
-    sleep_us(10);
-    pio_sm_clear_fifos(pio0, 0);
-    pio_sm_clear_fifos(pio0, 1);
-    pio_sm_clear_fifos(pio0, 2);
+    //sleep_us(10);
+    //pio_sm_clear_fifos(pio0, 1);
+    //pio_sm_clear_fifos(pio0, 2);
 }
 
 void emuz80_unreset(void) {
-    gpio_put(RESET_Pin, true);
     printf("reset High, start\n");   
+    gpio_put(RESET_Pin, true);
 }
 
 void emuz80_dma_init()
 {
+#if 0
     int ch_r_addr = dma_claim_unused_channel(true);
     int ch_r_data = dma_claim_unused_channel(true);
     int ch_w_addr = dma_claim_unused_channel(true);
@@ -255,6 +253,7 @@ void emuz80_dma_init()
     channel_config_set_ring(&cw_addr, true, 2);     // write to lower 2 byte
     dma_channel_configure(ch_w_addr, &cw_addr, &dma_hw->ch[ch_w_data].al2_write_addr_trig, 
         &pio0->rxf[1], 1, false);
+#endif
 }
 
 // コア1のエントリポイント
@@ -270,15 +269,26 @@ __attribute__((noinline)) void __time_critical_func(emuz80_core1_entry)(void)
     uint16_t addr;
     uint8_t data;
     uint32_t a32;
+    int xcount = 10;
 
     multicore_fifo_push_blocking(FLAG_VALUE);
     uint32_t g = multicore_fifo_pop_blocking();
+    // start target CPU
+    emuz80_unreset();
+    //sleep_us(1);
+
 loop:
-    while (((port = gpio_get_all()) & (1 << RD_Pin)) != 0)
-        ;
     a32 = pio_sm_get_blocking(pio0, 0);
-    printf("%08lX: %08lX\n", a32, port);
+    data = mem[a32&ADDR_MASK];
+    pio_sm_put(pio0, 0, data);
+    if (xcount > 0) {
+        printf("%08lX: %02lX\n", a32, data);
+        xcount--;
+    }
     goto loop;
+
+
+
     while (((port = gpio_get_all()) & (1 << IORQ_Pin)) != 0)
         ;
     if ((port & (1 << IORQ_Pin)) == 0) {
