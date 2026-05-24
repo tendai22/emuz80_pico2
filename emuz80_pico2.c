@@ -112,10 +112,6 @@ __attribute__((noinline)) int __time_critical_func(main)(void)
     setbuf(stdout, NULL);
     sleep_ms(1000);     // needed for starting USB printf
 
-    // Z80 Input pin initialize
-    emuz80_gpio_init();
-    emuz80_pio_init();
-    emuz80_dma_init();
 
     // mem clear
     for (int i = 0 ; i < sizeof mem; ++i)
@@ -151,10 +147,14 @@ __attribute__((noinline)) int __time_critical_func(main)(void)
     // halt
     mem[0] = 0x76;
 #endif
-#if 1
+#if 0
     // jr loop
     mem[0] = 0x18;
     mem[1] = 0xfe;
+#endif
+#if 1
+    for (int i = 0; i < 0x100; i++)
+        mem[i] = i + 1;
 #endif
 #if 0
     // JP 0000H
