@@ -157,7 +157,7 @@ void emuz80_pio_init() {
     //  18.7 ... 4.0-4.17MHz (250-260ns) .... 0/1 wait in M1, 1 wait in WR, 0/1 wait in RD
     //  10.0 ... 7.1-7.6MHz (130-140ns) ... seems to work
     //   5.0 ... 14-16MHz (60-70ns) ... does not works
-    sm_config_set_clkdiv(&c, 5000); // 12.0 ... 6.25MHz max
+    sm_config_set_clkdiv(&c, 20); // 12.0 ... 6.25MHz max
     pio_sm_init(pio1, 2, offset1, &c);
 
 
@@ -209,11 +209,12 @@ void emuz80_unreset(void) {
     gpio_put(RESET_Pin, true);
 }
 
-int ch_r_addr, ch_r_data, ch_w_addr, ch_w_data;
+int ch_r_base, ch_r_addr, ch_r_data, ch_w_addr, ch_w_data;
 uint32_t addr_temp;
 
 void emuz80_dma_init()
 {
+    ch_r_base = dma_claim_unused_channel(true);
     ch_r_addr = dma_claim_unused_channel(true);
     ch_r_data = dma_claim_unused_channel(true);
     ch_w_addr = dma_claim_unused_channel(true);
@@ -224,31 +225,45 @@ void emuz80_dma_init()
     channel_config_set_transfer_data_size(&cr_data, DMA_SIZE_8);
     channel_config_set_read_increment(&cr_data, false);
     channel_config_set_write_increment(&cr_data, false);
-    //channel_config_set_dreq(&cr_data, pio_get_dreq(pio0, 0, true));
-    //channel_config_set_ring(&cr_data, false, 16);     // read_addr: ring 2 byte
-    // ここで制御レジスタのMODEフィールドにENDLESS（値: 15）を埋め込む
-    // ※現在のSDKバージョンにヘルパー関数がない場合は直接書き換えます
-    //cr_data.ctrl |= (15u << DMA_CH1_CTRL_TRIG_MODE_LSB); 
-    dma_channel_configure(ch_r_data, &cr_data, &pio0_hw->txf[0], mem, 1, false);
-    dma_hw->ch[ch_r_data].transfer_count = 0xF0000001;
+    channel_config_set_chain_to(&cr_data, ch_r_base);
+    dma_channel_configure(ch_r_data, &cr_data, 
+        &pio0_hw->txf[0],
+        NULL, 
+        1, 
+        false);
     printf("mem: %08lX\n", mem);
     printf("dma_hw->ch[ch_r_data].read_addr: %08lX\n", dma_hw->ch[ch_r_data].read_addr);
     printf("dma_hw->ch[ch_r_data].write_addr: %08lX\n", dma_hw->ch[ch_r_data].write_addr);
 
     // Ch_R_Addr: PIO RX FIFO -> READ_ADDR Register in CH_R_data (16bit ring buffer)
     dma_channel_config cr_addr = dma_channel_get_default_config(ch_r_addr);
-    channel_config_set_transfer_data_size(&cr_addr, DMA_SIZE_16);
+    channel_config_set_transfer_data_size(&cr_addr, DMA_SIZE_32);
     channel_config_set_read_increment(&cr_addr, false);
     channel_config_set_write_increment(&cr_addr, false);
     channel_config_set_dreq(&cr_addr, pio_get_dreq(pio0, 0, false));
     channel_config_set_chain_to(&cr_addr, ch_r_data);
-//    dma_channel_configure(ch_r_addr, &cr_addr, &dma_hw->ch[ch_r_data].al1_read_addr, 
-//        &pio0->rxf[0], 1, true);
-    dma_channel_configure(ch_r_addr, &cr_addr, &dma_hw->ch[ch_r_data].al3_read_addr_trig, 
-        &pio0_hw->rxf[0], 1, false);
-    //dma_hw->ch[ch_r_addr].transfer_count = 0xF0000001;
+    volatile uint32_t *ch_r_read_addr_set_alias = hw_set_alias(&dma_hw->ch[ch_r_data].al1_read_addr);
+    dma_channel_configure(ch_r_addr, &cr_addr, 
+        ch_r_read_addr_set_alias, 
+        &pio0_hw->rxf[0], 
+        1, 
+        false);
     printf("ch_r_data: %d, ch_r_addr: %d\n", ch_r_data, ch_r_addr);
     printf("dma_hw->ch[ch_r_data].read_addr: %08lX\n", dma_hw->ch[ch_r_data].al1_read_addr);
+
+    static const uint32_t *base_addr = (uint32_t *)&mem[0];
+
+    // Ch_R_Base: &mem[0] -> ch_r_addr->read_addr
+    dma_channel_config cr_base = dma_channel_get_default_config(ch_r_base);
+    channel_config_set_transfer_data_size(&cr_base, DMA_SIZE_32);
+    channel_config_set_read_increment(&cr_base, false);
+    channel_config_set_write_increment(&cr_base, false);
+    channel_config_set_chain_to(&cr_base, ch_r_addr);
+    dma_channel_configure(ch_r_base, &cr_base, 
+        &dma_hw->ch[ch_r_data].al1_read_addr, 
+        &base_addr, 
+        1, 
+        false);
 
 #if 0
     // Ch W_Data: PIO RX FIFO -> RAM
@@ -289,7 +304,6 @@ __attribute__((noinline)) void __time_critical_func(emuz80_core1_entry)(void)
 
     multicore_fifo_push_blocking(FLAG_VALUE);
     uint32_t g = multicore_fifo_pop_blocking();
-    printf("ch_r_data: %d, ch_r_addr: %d\n", ch_r_data, ch_r_addr);
 
     // safe DMA abort
     // 1. エラッタ RP2350-E5 対策: 先にチャンネルの有効化を解除する
@@ -319,7 +333,6 @@ __attribute__((noinline)) void __time_critical_func(emuz80_core1_entry)(void)
 
     // start target CPU
     emuz80_unreset();
-    //sleep_us(1);
     while ((gpio_get_all() & (IORQ_Pin|RD_Pin)) != (IORQ_Pin|RD_Pin))
         ;
     // start internal machines
@@ -338,16 +351,13 @@ __attribute__((noinline)) void __time_critical_func(emuz80_core1_entry)(void)
     pio_sm_set_enabled(pio0, 2, true);  // ram_write_data
 #define USE_DMA
 #if defined(USE_DMA)
-    dma_channel_start(ch_r_addr);
-    dma_channel_start(ch_r_data);
+    dma_channel_start(ch_r_base);
 #endif
 
 loop:
-    //while(1);
     while (((port = gpio_get_all()) & (1 << RD_Pin)) != 0)
         ;
 #if defined(USE_DMA)
-    //sleep_us(1);
     if (xcount > 0) printf("X ");
     //a32 = (uint32_t)&(mem[gpio_get_all()&ADDR_MASK]);
     a32 = (uint32_t)&mem[0] + (gpio_get_all() & ADDR_MASK);

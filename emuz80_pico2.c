@@ -22,6 +22,7 @@
 #include "hardware/uart.h"
 #include "pico/multicore.h"
 #include "hardware/gpio.h"
+#include "hardware/clocks.h"
 #include "tusb.h"
 #include "pico/stdio_usb.h"
 
@@ -107,6 +108,7 @@ __attribute__((noinline)) void __time_critical_func(emuz80_core0_entry)(void)
 
 __attribute__((noinline)) int __time_critical_func(main)(void) 
 {
+    set_sys_clock_khz(250000, true);
 
     stdio_init_all();
     setbuf(stdout, NULL);
