@@ -29,6 +29,8 @@ extern volatile int rx_rdy, tx_rdy, rx_data, tx_data, txbuf_full;
 #define sm_config_set_in_pin_count(c, num)
 #endif
 
+float clk_divider = 25;
+
 void emuz80_gpio_init()
 {
     // GPIO Out
@@ -157,7 +159,7 @@ void emuz80_pio_init() {
     //  18.7 ... 4.0-4.17MHz (250-260ns) .... 0/1 wait in M1, 1 wait in WR, 0/1 wait in RD
     //  10.0 ... 7.1-7.6MHz (130-140ns) ... seems to work
     //   5.0 ... 14-16MHz (60-70ns) ... does not works
-    sm_config_set_clkdiv(&c, 20); // 12.0 ... 6.25MHz max
+    sm_config_set_clkdiv(&c, clk_divider); // 12.0 ... 6.25MHz max
     pio_sm_init(pio1, 2, offset1, &c);
 
 
@@ -194,8 +196,6 @@ void emuz80_pio_init() {
         gpio_set_slew_rate(i, GPIO_SLEW_RATE_FAST);
     }
 #endif
-    // start PIO state machines
-    pio_sm_set_enabled(pio1, 2, true);  // clockgen
     // need starting clock before iorq_wait start
     //sleep_us(10);
     //pio_sm_set_enabled(pio1, 3, true);  // iorq_wait
@@ -205,7 +205,7 @@ void emuz80_pio_init() {
 }
 
 void emuz80_unreset(void) {
-    printf("reset High, start\n");   
+    //printf("reset High, start\n");   
     gpio_put(RESET_Pin, true);
 }
 
@@ -331,11 +331,7 @@ __attribute__((noinline)) void __time_critical_func(emuz80_core1_entry)(void)
         if (i % 8 == 7) printf("\n");
     }
 
-    // start target CPU
-    emuz80_unreset();
-    while ((gpio_get_all() & (IORQ_Pin|RD_Pin)) != (IORQ_Pin|RD_Pin))
-        ;
-    // start internal machines
+    // restart pio state machnes
     pio_sm_set_enabled(pio0, 0, false);  // ram_read
     pio_sm_clear_fifos(pio0, 0);
     pio_sm_restart(pio0, 0);
@@ -345,6 +341,8 @@ __attribute__((noinline)) void __time_critical_func(emuz80_core1_entry)(void)
     pio_sm_set_enabled(pio0, 2, false);  // ram_write_data
     pio_sm_clear_fifos(pio0, 2);
     pio_sm_restart(pio0, 2);
+
+    // start pio state machines and dma's
     //pio_sm_set_enabled(pio1, 3, true);  // iorq_wait
     pio_sm_set_enabled(pio0, 0, true);  // ram_read
     pio_sm_set_enabled(pio0, 1, true);  // ram_write_addr
@@ -353,6 +351,17 @@ __attribute__((noinline)) void __time_critical_func(emuz80_core1_entry)(void)
 #if defined(USE_DMA)
     dma_channel_start(ch_r_base);
 #endif
+    // start target CPU clock
+    pio_sm_set_enabled(pio1, 2, true);  // clockgen
+    // wait for some time, which seems to be needed
+    // CPU clock: (1000 * 2 / 250) (ns) * clk_divider
+    float period = ((1000 * 2 / 250) * clk_divider) * 10 / 1000;
+    printf("period: %.0f\n", period);
+    sleep_us((int)period);  // clk_divider / 250MHz
+    // start target CPU
+    emuz80_unreset();
+    while ((gpio_get_all() & (IORQ_Pin|RD_Pin)) != (IORQ_Pin|RD_Pin))
+        ;
 
 loop:
     while (((port = gpio_get_all()) & (1 << RD_Pin)) != 0)
