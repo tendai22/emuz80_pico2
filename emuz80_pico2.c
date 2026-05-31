@@ -132,6 +132,7 @@ __attribute__((noinline)) int __time_critical_func(main)(void)
     //
     // debug Z80 codes
     //
+    int a = 0;
 #if 0
     for (int i = 0 ; i < sizeof emuz80_binary; ++i) {
         if (i % 8 == 0)
@@ -176,14 +177,15 @@ __attribute__((noinline)) int __time_critical_func(main)(void)
 #endif
 #if 1
     // inc (hl) loop
-    mem[0] = 0x21;
-    mem[1] = 0x38;
-    mem[2] = 0x00;
-    mem[3] = 0x34;
-    mem[4] = 0x18;
-    mem[5] = 0xfd;
-    mem[6] = 0x0;
-    mem[0x38] = 10;
+    a = 0;
+    mem[a++] = 0x21;
+    mem[a++] = 0x38;
+    mem[a++] = 0x56;
+    mem[a++] = 0x34;
+    mem[a++] = 0x18;
+    mem[a++] = 0xfd;
+    mem[a++] = 0x0;
+    mem[0x5638] = 3;
 #endif
 #if 0
     // in 0h loop

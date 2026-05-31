@@ -208,7 +208,8 @@ void emuz80_pio_init() {
 }
 
 void emuz80_unreset(void) {
-    //printf("reset High, start\n");   
+    //printf("reset High, start\n");
+    //sleep_ms(200);   
     gpio_put(RESET_Pin, true);
 }
 
@@ -268,7 +269,7 @@ void emuz80_dma_init()
         &base_addr, 
         1, 
         false);
-#if 1
+#if 0
     // Ch W_Data: PIO RX FIFO -> RAM
     dma_channel_config cw_data = dma_channel_get_default_config(ch_w_data);
     channel_config_set_transfer_data_size(&cw_data, DMA_SIZE_8);
@@ -322,8 +323,8 @@ __attribute__((noinline)) void __time_critical_func(emuz80_core1_entry)(void)
     uint32_t status;
     uint16_t addr;
     uint8_t data;
-    uint32_t a32;
-    int xcount = 10;
+    volatile register uint32_t a32, d32;
+    int xcount = 100;
 
 
     multicore_fifo_push_blocking(FLAG_VALUE);
@@ -387,7 +388,7 @@ __attribute__((noinline)) void __time_critical_func(emuz80_core1_entry)(void)
 #define USE_DMA
 #if defined(USE_DMA)
     dma_channel_start(ch_r_base);
-    dma_channel_start(ch_w_base);
+    //dma_channel_start(ch_w_base);
 #endif
     // start target CPU clock
     pio_sm_set_enabled(pio1, 2, true);  // clockgen
@@ -398,9 +399,37 @@ __attribute__((noinline)) void __time_critical_func(emuz80_core1_entry)(void)
     sleep_us((int)period);  // clk_divider / 250MHz
     // start target CPU
     emuz80_unreset();
-    while ((gpio_get_all() & (IORQ_Pin|RD_Pin)) != (IORQ_Pin|RD_Pin))
-        ;
-
+    //while ((gpio_get_all() & (IORQ_Pin|RD_Pin)) != (IORQ_Pin|RD_Pin))
+    //    ;
+#if 1
+    // write pio test
+    xcount = 0;
+    while (1) {
+#if 0
+        if (((gpio_get_all()) & RD_Pin) == 0) {
+            //sleep_us(1);
+            port = gpio_get_all();
+            //if ((port & ADDR_MASK) > 0x100) {
+            //    if (xcount > 0) { printf("a%08lX d%08lX\n", (port), (port >> D0_Pin)); }
+            //}
+            if (xcount > 0) printf("a%08lX d%08lX\n", (port), (port >> D0_Pin));
+            while ((gpio_get_all() & RD_Pin) == 0)
+                ;
+        }
+#endif
+        //if ((gpio_get_all() & WR_Pin) == 0) {
+            a32 = pio_sm_get_blocking(pio0, 1);
+            d32 = pio_sm_get_blocking(pio0, 2);
+            mem[a32 & ADDR_MASK] = (uint8_t)d32;
+            if (xcount > 0) { printf("A%08lX ", a32); }
+            if (xcount > 0) {
+                printf("D%08lX\n", d32);
+            }
+            xcount--;
+        //}
+    }
+#endif
+#if 0
 loop:
     while (((port = gpio_get_all()) & ((1 << RD_Pin)|(1 << WR_Pin))) == ((1 << RD_Pin)|(1 << WR_Pin)))
         ;
@@ -429,9 +458,9 @@ loop:
     while (((port = gpio_get_all()) & ((1 << RD_Pin)|(1 << WR_Pin))) != ((1 << RD_Pin)|(1 << WR_Pin)))
         ;
     goto loop;
+#endif
 
-
-
+loop:
     while (((port = gpio_get_all()) & (1 << IORQ_Pin)) != 0)
         ;
     if ((port & (1 << IORQ_Pin)) == 0) {
