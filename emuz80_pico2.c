@@ -154,7 +154,8 @@ __attribute__((noinline)) int __time_critical_func(main)(void)
     mem[0] = 0x18;
     mem[1] = 0xfe;
 #endif
-#if 1
+#if 0
+    // 00 -> FF, halt in 0x0076
     for (int i = 0; i < 0x100; i++)
         mem[i] = i + 1;
 #endif
@@ -173,7 +174,7 @@ __attribute__((noinline)) int __time_critical_func(main)(void)
     mem[4] = 0x18;  // JR
     mem[5] = 0xfd;  // -3
 #endif
-#if 0
+#if 1
     // inc (hl) loop
     mem[0] = 0x21;
     mem[1] = 0x38;
@@ -182,6 +183,7 @@ __attribute__((noinline)) int __time_critical_func(main)(void)
     mem[4] = 0x18;
     mem[5] = 0xfd;
     mem[6] = 0x0;
+    mem[0x38] = 10;
 #endif
 #if 0
     // in 0h loop
@@ -244,10 +246,7 @@ __attribute__((noinline)) int __time_critical_func(main)(void)
     }
 
     multicore_fifo_push_blocking(FLAG_VALUE);   // start core1
-    sleep_us(2);
 
-    // start target CPU
-    //emuz80_unreset();
     // start peripheral emulation loop
     emuz80_core0_entry();
     // NOT REACHED

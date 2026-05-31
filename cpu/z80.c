@@ -29,7 +29,7 @@ extern volatile int rx_rdy, tx_rdy, rx_data, tx_data, txbuf_full;
 #define sm_config_set_in_pin_count(c, num)
 #endif
 
-float clk_divider = 25;
+float clk_divider = 25000;
 
 void emuz80_gpio_init()
 {
@@ -112,14 +112,15 @@ void emuz80_pio_init() {
     //   JMP_PIN: WR_Pin(21)
 	offset1 = pio_add_program(pio0, &ram_write_addr_program);
     printf("ram_write_addr: %d\n", offset1);
+    pio_sm_set_consecutive_pindirs(pio0, 1, A0_Pin, 16, false);
     pio_sm_set_consecutive_pindirs(pio0, 1, WR_Pin, 1, false);
     c = ram_write_addr_program_get_default_config(offset1);
     sm_config_set_in_pins(&c, A0_Pin);
     sm_config_set_in_pin_count(&c, 16);
-    sm_config_set_in_shift(&c, false, true, 16);    // 16bit autopush
+    sm_config_set_in_shift(&c, false, false, 32);    // 16bit autopush
     sm_config_set_out_pins(&c, D0_Pin, 8);
     sm_config_set_out_pin_count(&c, 8);
-    sm_config_set_out_shift(&c, true, false, 8);    // 8bit no-autopush
+    sm_config_set_out_shift(&c, false, false, 8);    // 8bit no-autopush
     sm_config_set_jmp_pin(&c, WR_Pin);
     sm_config_set_clkdiv(&c, 1);         // 1 ... full speed 
     pio_sm_init(pio0, 1, offset1, &c);
@@ -129,10 +130,12 @@ void emuz80_pio_init() {
     offset1 = pio_add_program(pio0, &ram_write_data_program);
     printf("ram_write_data: %d\n", offset1);
     pio_sm_set_consecutive_pindirs(pio0, 2, D0_Pin, 8, false);  // data as input
+    pio_sm_set_consecutive_pindirs(pio0, 2, WR_Pin, 1, false);
     c = ram_write_data_program_get_default_config(offset1);
     sm_config_set_in_pins(&c, D0_Pin);
     sm_config_set_in_pin_count(&c, 8);
     sm_config_set_in_shift(&c, false, false, 32);   // no-autopush
+    sm_config_set_jmp_pin(&c, WR_Pin);
     sm_config_set_clkdiv(&c, 1);         // 1 ... full speed 
     pio_sm_init(pio0, 2, offset1, &c);
  
@@ -209,7 +212,7 @@ void emuz80_unreset(void) {
     gpio_put(RESET_Pin, true);
 }
 
-int ch_r_base, ch_r_addr, ch_r_data, ch_w_addr, ch_w_data;
+int ch_r_base, ch_r_addr, ch_r_data, ch_w_addr, ch_w_data, ch_w_base;
 uint32_t addr_temp;
 
 void emuz80_dma_init()
@@ -217,6 +220,7 @@ void emuz80_dma_init()
     ch_r_base = dma_claim_unused_channel(true);
     ch_r_addr = dma_claim_unused_channel(true);
     ch_r_data = dma_claim_unused_channel(true);
+    ch_w_base = dma_claim_unused_channel(true);
     ch_w_addr = dma_claim_unused_channel(true);
     ch_w_data = dma_claim_unused_channel(true);
 
@@ -264,25 +268,45 @@ void emuz80_dma_init()
         &base_addr, 
         1, 
         false);
-
-#if 0
+#if 1
     // Ch W_Data: PIO RX FIFO -> RAM
     dma_channel_config cw_data = dma_channel_get_default_config(ch_w_data);
     channel_config_set_transfer_data_size(&cw_data, DMA_SIZE_8);
     channel_config_set_read_increment(&cw_data, false);
     channel_config_set_write_increment(&cw_data, false);
     channel_config_set_dreq(&cw_data, pio_get_dreq(pio0, 2, false));
-    dma_channel_configure(ch_w_data, &cw_data, mem, &pio0->rxf[1], 1, false);
+    channel_config_set_chain_to(&cw_data, ch_w_base);
+    dma_channel_configure(ch_w_data, &cw_data,
+        NULL,
+        &pio0->rxf[2],
+        1,
+        false);
     
     // Ch W_Addr: PIO RX FIFO -> WRITE_ADDR register in Ch W_Data (ring buffer)
     dma_channel_config cw_addr = dma_channel_get_default_config(ch_w_addr);
-    channel_config_set_transfer_data_size(&cw_addr, DMA_SIZE_16);
+    channel_config_set_transfer_data_size(&cw_addr, DMA_SIZE_32);
     channel_config_set_write_increment(&cw_addr, false);
     channel_config_set_dreq(&cw_addr, pio_get_dreq(pio0, 1, false));
     channel_config_set_chain_to(&cw_addr, ch_w_data);
     channel_config_set_ring(&cw_addr, true, 2);     // write to lower 2 byte
-    dma_channel_configure(ch_w_addr, &cw_addr, &dma_hw->ch[ch_w_data].al2_write_addr_trig, 
-        &pio0->rxf[1], 1, false);
+    volatile uint32_t *ch_w_write_addr_set_alias = hw_set_alias(&dma_hw->ch[ch_w_data].al1_write_addr);
+    dma_channel_configure(ch_w_addr, &cw_addr,
+        ch_w_write_addr_set_alias,
+        &pio0->rxf[1],
+        1, 
+        false);
+
+    // Ch_W_Base: &mem[0] -> ch_r_addr->read_addr
+    dma_channel_config cw_base = dma_channel_get_default_config(ch_w_base);
+    channel_config_set_transfer_data_size(&cw_base, DMA_SIZE_32);
+    channel_config_set_read_increment(&cw_base, false);
+    channel_config_set_write_increment(&cw_base, false);
+    channel_config_set_chain_to(&cw_base, ch_w_addr);
+    dma_channel_configure(ch_w_base, &cw_base, 
+        &dma_hw->ch[ch_w_data].al1_write_addr, 
+        &base_addr, 
+        1, 
+        false);
 #endif
 }
 
@@ -309,15 +333,28 @@ __attribute__((noinline)) void __time_critical_func(emuz80_core1_entry)(void)
     // 1. エラッタ RP2350-E5 対策: 先にチャンネルの有効化を解除する
     dma_hw->ch[0].al1_ctrl &= ~DMA_CH0_CTRL_TRIG_EN_BITS;
     dma_hw->ch[1].al1_ctrl &= ~DMA_CH0_CTRL_TRIG_EN_BITS;
+    dma_hw->ch[2].al1_ctrl &= ~DMA_CH0_CTRL_TRIG_EN_BITS;
+    dma_hw->ch[3].al1_ctrl &= ~DMA_CH0_CTRL_TRIG_EN_BITS;
+    dma_hw->ch[4].al1_ctrl &= ~DMA_CH0_CTRL_TRIG_EN_BITS;
+    dma_hw->ch[5].al1_ctrl &= ~DMA_CH0_CTRL_TRIG_EN_BITS;
     // （もし別チャンネルへのチェーン設定がある場合、その先のチャンネルも同様にクリアする）
 
     // 2. チャンネルのアボート（強制終了）を要求
     dma_channel_abort(0);
     dma_channel_abort(1);
+    dma_channel_abort(2);
+    dma_channel_abort(3);
+    dma_channel_abort(4);
+    dma_channel_abort(5);
 
     // 3. アボートが完全に完了するまでループで待機（RP2350の安全な作法）
     // アボート中は該当ビットが1になり、完了すると0に戻ります
-    while (dma_channel_is_busy(0) || dma_channel_is_busy(1)) {
+    while (dma_channel_is_busy(0) ||
+           dma_channel_is_busy(1) ||
+           dma_channel_is_busy(2) || 
+           dma_channel_is_busy(3) || 
+           dma_channel_is_busy(4) || 
+           dma_channel_is_busy(5)) {
             tight_loop_contents();
     }
 
@@ -350,6 +387,7 @@ __attribute__((noinline)) void __time_critical_func(emuz80_core1_entry)(void)
 #define USE_DMA
 #if defined(USE_DMA)
     dma_channel_start(ch_r_base);
+    dma_channel_start(ch_w_base);
 #endif
     // start target CPU clock
     pio_sm_set_enabled(pio1, 2, true);  // clockgen
@@ -364,7 +402,7 @@ __attribute__((noinline)) void __time_critical_func(emuz80_core1_entry)(void)
         ;
 
 loop:
-    while (((port = gpio_get_all()) & (1 << RD_Pin)) != 0)
+    while (((port = gpio_get_all()) & ((1 << RD_Pin)|(1 << WR_Pin))) == ((1 << RD_Pin)|(1 << WR_Pin)))
         ;
 #if defined(USE_DMA)
     if (xcount > 0) printf("X ");
@@ -373,8 +411,8 @@ loop:
     //dma_hw->ch[ch_r_data].al3_read_addr_trig = a32;
     sleep_us(1);
     if (xcount > 0) {
-        temp = dma_hw->ch[ch_r_data].read_addr;
-        printf("%08lX, %08lX, %08lX\n", temp, gpio_get_all(), dma_hw->ch[ch_r_data].transfer_count);
+        temp = dma_hw->ch[ch_w_data].write_addr;
+        printf("%08lX, %08lX\n", temp, gpio_get_all());
         xcount--;
     }
 #else
@@ -388,7 +426,7 @@ loop:
         xcount--;
     }
 #endif
-    while (((port = gpio_get_all()) & (1 << RD_Pin)) == 0)
+    while (((port = gpio_get_all()) & ((1 << RD_Pin)|(1 << WR_Pin))) != ((1 << RD_Pin)|(1 << WR_Pin)))
         ;
     goto loop;
 
