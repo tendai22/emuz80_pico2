@@ -46,7 +46,7 @@ loop_1:
 loop_2:
     wait 1 gpio IORQ_Pin ; wait for IORQ==High && WR==Low
     jmp pin loop_2
-    ;mov pindirs, null   ; D0-D7 as input
+    mov pindirs, null   ; D0-D7 as input
     in pins, 16
     push
     wait 1 gpio WR_Pin
@@ -61,9 +61,9 @@ loop_3:
     wait 1 gpio IORQ_Pin
     jmp pin loop_3
     nop [10]
-    wait 1 gpio WR_Pin  ; wait for WR upper edge
     in pins, 8
     push
+    wait 1 gpio WR_Pin  ; wait for WR upper edge
 .wrap
 
 ;

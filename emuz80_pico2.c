@@ -182,10 +182,12 @@ __attribute__((noinline)) int __time_critical_func(main)(void)
     mem[a++] = 0x38;
     mem[a++] = 0x56;
     mem[a++] = 0x34;
+    mem[a++] = 0x34;
+    mem[a++] = 0x34;
     mem[a++] = 0x18;
-    mem[a++] = 0xfd;
+    mem[a++] = 0xfb;
     mem[a++] = 0x0;
-    mem[0x5638] = 3;
+    mem[0x5638] = 0x9a;
 #endif
 #if 0
     // in 0h loop
