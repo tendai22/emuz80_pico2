@@ -117,7 +117,7 @@ void emuz80_pio_init() {
     c = ram_write_addr_program_get_default_config(offset1);
     sm_config_set_in_pins(&c, A0_Pin);
     sm_config_set_in_pin_count(&c, 16);
-    sm_config_set_in_shift(&c, false, false, 32);    // 16bit autopush
+    sm_config_set_in_shift(&c, false, false, 16);    // 16bit autopush
     sm_config_set_out_pins(&c, D0_Pin, 8);
     sm_config_set_out_pin_count(&c, 8);
     sm_config_set_out_shift(&c, false, false, 8);    // 8bit no-autopush
@@ -134,7 +134,7 @@ void emuz80_pio_init() {
     c = ram_write_data_program_get_default_config(offset1);
     sm_config_set_in_pins(&c, D0_Pin);
     sm_config_set_in_pin_count(&c, 8);
-    sm_config_set_in_shift(&c, false, false, 32);   // no-autopush
+    sm_config_set_in_shift(&c, false, false, 8);   // no-autopush
     sm_config_set_jmp_pin(&c, WR_Pin);
     sm_config_set_clkdiv(&c, 1);         // 1 ... full speed 
     pio_sm_init(pio0, 2, offset1, &c);
@@ -215,6 +215,8 @@ void emuz80_unreset(void) {
 
 int ch_r_base, ch_r_addr, ch_r_data, ch_w_addr, ch_w_data, ch_w_base;
 volatile uint32_t addr_temp;
+volatile uint32_t *dummy = (uint32_t *)0x12345678;
+const uint32_t *wr_addr = (uint32_t *)&mem[0x5638];
 
 void emuz80_dma_init()
 {
@@ -275,10 +277,10 @@ void emuz80_dma_init()
     channel_config_set_transfer_data_size(&cw_data, DMA_SIZE_8);
     channel_config_set_read_increment(&cw_data, false);
     channel_config_set_write_increment(&cw_data, false);
-    //channel_config_set_dreq(&cw_data, pio_get_dreq(pio0, 2, false));
+    channel_config_set_dreq(&cw_data, pio_get_dreq(pio0, 2, false));
     channel_config_set_chain_to(&cw_data, ch_w_base);
     dma_channel_configure(ch_w_data, &cw_data,
-        NULL, //(uint32_t *)0x20015638,
+        NULL,
         &pio0->rxf[2],
         1,
         false);
@@ -286,26 +288,27 @@ void emuz80_dma_init()
     // Ch W_Addr: PIO RX FIFO -> WRITE_ADDR register in Ch W_Data (ring buffer)
     dma_channel_config cw_addr = dma_channel_get_default_config(ch_w_addr);
     channel_config_set_transfer_data_size(&cw_addr, DMA_SIZE_32);
+    channel_config_set_read_increment(&cw_addr, false);
     channel_config_set_write_increment(&cw_addr, false);
-    channel_config_set_dreq(&cw_addr, pio_get_dreq(pio0, 1, false));
     channel_config_set_chain_to(&cw_addr, ch_w_data);
-    channel_config_set_ring(&cw_addr, true, 2);     // write to lower 2 byte
     volatile uint32_t *ch_w_write_addr_set_alias = hw_set_alias(&dma_hw->ch[ch_w_data].al1_write_addr);
     dma_channel_configure(ch_w_addr, &cw_addr,
-        hw_set_alias(&dma_hw->ch[ch_w_data].al1_write_addr), //ch_w_write_addr_set_alias,
+        hw_set_alias(&dma_hw->ch[ch_w_data].al1_write_addr),
         &pio0->rxf[1],
         1, 
         false);
-
+    printf("hw_set_addr: %08X, write_addr: %08X\n", hw_set_alias(&dma_hw->ch[ch_w_data].al1_write_addr), &dma_hw->ch[ch_w_data].al1_write_addr);
+    printf("pio0->rxf[1]: %08X\n", &pio0->rxf[1]);
     // Ch_W_Base: &mem[0] -> ch_r_addr->read_addr
     dma_channel_config cw_base = dma_channel_get_default_config(ch_w_base);
     channel_config_set_transfer_data_size(&cw_base, DMA_SIZE_32);
     channel_config_set_read_increment(&cw_base, false);
     channel_config_set_write_increment(&cw_base, false);
+    channel_config_set_dreq(&cw_base, pio_get_dreq(pio0, 1, false));
     channel_config_set_chain_to(&cw_base, ch_w_addr);
     dma_channel_configure(ch_w_base, &cw_base, 
         &dma_hw->ch[ch_w_data].al1_write_addr, 
-        &base_addr, 
+        &base_addr,
         1, 
         false);
 #endif
@@ -364,7 +367,7 @@ __attribute__((noinline)) void __time_critical_func(emuz80_core1_entry)(void)
     emuz80_pio_init();
     emuz80_dma_init();
 
-    for (int i = 0; i < 0x20; ++i) {
+    for (int i = 0; i < 0x10; ++i) {
         printf("%02X ", mem[i]);
         if (i % 8 == 7) printf("\n");
     }
@@ -403,7 +406,7 @@ __attribute__((noinline)) void __time_critical_func(emuz80_core1_entry)(void)
     //    ;
 #if 1
     // write pio test
-    xcount = 20;
+    xcount = 10;
     while (1) {
 #if 0
         if (((gpio_get_all()) & (1<<RD_Pin)) == 0) {
@@ -418,19 +421,27 @@ __attribute__((noinline)) void __time_critical_func(emuz80_core1_entry)(void)
         }
 #endif
         while ((gpio_get_all() & (1<<WR_Pin)) != 0)
-            a32 = dma_hw->ch[ch_w_data].write_addr;
-        //sleep_us(1);
+            ;
         
-        port = gpio_get_all();
         volatile uint8_t d1 = mem[0x5638];
         while ((gpio_get_all() & (1<<WR_Pin)) == 0)
             ;
         //a32 = pio_sm_get_blocking(pio0, 1);
         //d32 = pio_sm_get_blocking(pio0, 2);
         //mem[a32 & ADDR_MASK] = (uint8_t)d32;
+        port = gpio_get_all();
+        a32 = dma_hw->ch[ch_w_data].al1_write_addr;
+        volatile uint8_t d2 = mem[0x5638];
         if (xcount > 0) { 
-            printf("a%08lX %08lX %02X\n", port, a32, d1);
+            printf("a%08lX %08lX %02X\n", port, a32, d2);
             xcount--; 
+        }
+        if (xcount == 1) {
+            for (int i = 0; i < 0x10000; ++i) {
+                if (i >= 8 && mem[i] != 0) {
+                    printf("X %04X %02X\n", i, mem[i]);
+                }
+            }
         }
     }
 #endif
