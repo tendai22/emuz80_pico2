@@ -83,7 +83,6 @@ void emuz80_pio_init() {
 
 #if defined(RP2350B)
     // pio_set_gpio_base should be invoked before pio_add_program
-    //pio_set_gpio_base(pio0, 16);
     pio_set_gpio_base(pio1, 16);
 #endif //defined(RP2350B)
     pio_sm_config c;
@@ -143,7 +142,6 @@ void emuz80_pio_init() {
 	// 	 SET: BASE: 40(CLK_Pin, inverted), 41(INT_Pin, inverted)
     offset1 = pio_add_program(pio1, &clockgen_program);
     printf("clockgen: %d\n", offset1);
-    //clockgen_program_init(pio0, 3, offset1, CLK_Pin, 1);
     int phase = 1;
     pio_gpio_init(pio1, CLK_Pin);
     if (phase == 2)
@@ -199,17 +197,9 @@ void emuz80_pio_init() {
         gpio_set_slew_rate(i, GPIO_SLEW_RATE_FAST);
     }
 #endif
-    // need starting clock before iorq_wait start
-    //sleep_us(10);
-    //pio_sm_set_enabled(pio1, 3, true);  // iorq_wait
-    //sleep_us(10);
-    //pio_sm_clear_fifos(pio0, 1);
-    //pio_sm_clear_fifos(pio0, 2);
 }
 
 void emuz80_unreset(void) {
-    //printf("reset High, start\n");
-    //sleep_ms(200);   
     gpio_put(RESET_Pin, true);
 }
 
@@ -238,9 +228,6 @@ void emuz80_dma_init()
         NULL, 
         1, 
         false);
-    printf("mem: %08lX\n", mem);
-    printf("dma_hw->ch[ch_r_data].read_addr: %08lX\n", dma_hw->ch[ch_r_data].read_addr);
-    printf("dma_hw->ch[ch_r_data].write_addr: %08lX\n", dma_hw->ch[ch_r_data].write_addr);
 
     // Ch_R_Addr: PIO RX FIFO -> READ_ADDR Register in CH_R_data (16bit ring buffer)
     dma_channel_config cr_addr = dma_channel_get_default_config(ch_r_addr);
@@ -255,8 +242,8 @@ void emuz80_dma_init()
         &pio0_hw->rxf[0], 
         1, 
         false);
-    printf("ch_r_data: %d, ch_r_addr: %d\n", ch_r_data, ch_r_addr);
-    printf("dma_hw->ch[ch_r_data].read_addr: %08lX\n", dma_hw->ch[ch_r_data].al1_read_addr);
+    //printf("ch_r_data: %d, ch_r_addr: %d\n", ch_r_data, ch_r_addr);
+    //printf("dma_hw->ch[ch_r_data].read_addr: %08lX\n", dma_hw->ch[ch_r_data].al1_read_addr);
 
     static const uint32_t *base_addr = (uint32_t *)&mem[0];
 
@@ -402,13 +389,12 @@ __attribute__((noinline)) void __time_critical_func(emuz80_core1_entry)(void)
     sleep_us((int)period);  // clk_divider / 250MHz
     // start target CPU
     emuz80_unreset();
-    //while ((gpio_get_all() & (IORQ_Pin|RD_Pin)) != (IORQ_Pin|RD_Pin))
-    //    ;
-#if 1
+#define TEST_DMA
+#if defined(TEST_DMA)
     // write pio test
     xcount = 10;
     while (1) {
-#if 0
+#if defined(TEST_MEMRD)
         if (((gpio_get_all()) & (1<<RD_Pin)) == 0) {
             //sleep_us(1);
             port = gpio_get_all();
@@ -420,17 +406,17 @@ __attribute__((noinline)) void __time_critical_func(emuz80_core1_entry)(void)
                 ;
         }
 #endif
+#define TEST_MEMWR
+#if defined(TEST_MEMWR)
         while ((gpio_get_all() & (1<<WR_Pin)) != 0)
             ;
         
         volatile uint8_t d1 = mem[0x5638];
         while ((gpio_get_all() & (1<<WR_Pin)) == 0)
             ;
-        //a32 = pio_sm_get_blocking(pio0, 1);
-        //d32 = pio_sm_get_blocking(pio0, 2);
-        //mem[a32 & ADDR_MASK] = (uint8_t)d32;
         port = gpio_get_all();
         a32 = dma_hw->ch[ch_w_data].al1_write_addr;
+        //sleep_us(1);
         volatile uint8_t d2 = mem[0x5638];
         if (xcount > 0) { 
             printf("a%08lX %08lX %02X\n", port, a32, d2);
@@ -444,6 +430,7 @@ __attribute__((noinline)) void __time_critical_func(emuz80_core1_entry)(void)
             }
         }
     }
+#endif
 #endif
 #if 0
 loop:

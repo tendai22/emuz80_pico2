@@ -25,7 +25,6 @@
 loop_1:
     wait 1 gpio IORQ_Pin ; wait for IORQ==High && RD==Low
     jmp pin loop_1
-    ;nop [10]            ; 5 -- 10 delay is needed for DMA transfer
     in pins, 16         ; capture A0-A15
     push                ; 32 bit is specified in in-shift,
                         ; so explicit push is needed. 
