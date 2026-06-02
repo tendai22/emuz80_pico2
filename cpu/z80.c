@@ -29,7 +29,7 @@ extern volatile int rx_rdy, tx_rdy, rx_data, tx_data, txbuf_full;
 #define sm_config_set_in_pin_count(c, num)
 #endif
 
-float clk_divider = 25000;
+float clk_divider = 31;     // 31 ... about 4MHz
 
 void emuz80_gpio_init()
 {
