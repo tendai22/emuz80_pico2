@@ -157,8 +157,8 @@ __attribute__((noinline)) int __time_critical_func(main)(void)
 #endif
 #if 0
     // 00 -> FF, halt in 0x0076
-    for (int i = 0; i < 0x100; i++)
-        mem[i] = i + 1;
+    for (int i = 0; i <= 0xffff; i++)
+        mem[i] = (i + 1)%256;
 #endif
 #if 0
     // JP 0000H

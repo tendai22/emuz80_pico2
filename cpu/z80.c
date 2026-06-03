@@ -12,6 +12,7 @@
 #include "hardware/gpio.h"
 #include "hardware/dma.h"
 #include "hardware/resets.h"
+#include "hardware/regs/addressmap.h"
 #include "tusb.h"
 #include "pico/stdio_usb.h"
 
@@ -19,6 +20,20 @@
 
 #include "emuz80.h"
 #include "z80_rp2350b.pio.h"
+
+//
+// Narrow IO Register write
+//
+// By ORing bit14 of the write_addr register alias, 
+// in DMA write operation with size DMA_SIZE_16 or DMA_SIZE_8,
+// only the corresponding width (bytes) of the target register is written.
+//
+#if !defined(REG_ALIAS_NARROW_ZERO_BITS)
+#define REG_ALIAS_NARROW_ZERO_BITS (_u(0x1)<<_u(14))
+#endif
+#define hw_narrow_zero_alias(p) ((void *)((unsigned long int)(p)|REG_ALIAS_NARROW_ZERO_BITS))
+
+
 
 extern volatile int rx_rdy, tx_rdy, rx_data, tx_data, txbuf_full;
 //
@@ -29,8 +44,10 @@ extern volatile int rx_rdy, tx_rdy, rx_data, tx_data, txbuf_full;
 #define sm_config_set_in_pin_count(c, num)
 #endif
 
-float clk_divider = 31;     // 31 ... about 4MHz
-
+float clk_divider = 8;      // 31 ... about 4MHz
+                            // 30000 for debugging
+                            // 9 ... 13.89MHz seems to OK
+                            // 8 ... 15.62MHz no good.
 void emuz80_gpio_init()
 {
     // GPIO Out
@@ -95,6 +112,7 @@ void emuz80_pio_init() {
 	offset1 = pio_add_program(pio0, &ram_read_program);
     printf("ram_read: %d\n", offset1);
     pio_sm_set_consecutive_pindirs(pio0, 0, A0_Pin, 16, false);
+    //pio_sm_set_consecutive_pindirs(pio0, 0, RD_Pin, 1, false);
     c = ram_read_program_get_default_config(offset1);
     sm_config_set_in_pins(&c, A0_Pin);
     sm_config_set_in_pin_count(&c, 16);
@@ -116,7 +134,7 @@ void emuz80_pio_init() {
     c = ram_write_addr_program_get_default_config(offset1);
     sm_config_set_in_pins(&c, A0_Pin);
     sm_config_set_in_pin_count(&c, 16);
-    sm_config_set_in_shift(&c, false, false, 16);    // 16bit autopush
+    sm_config_set_in_shift(&c, false, false, 32); //16);    // 16bit autopush
     sm_config_set_out_pins(&c, D0_Pin, 8);
     sm_config_set_out_pin_count(&c, 8);
     sm_config_set_out_shift(&c, false, false, 8);    // 8bit no-autopush
@@ -207,6 +225,7 @@ int ch_r_base, ch_r_addr, ch_r_data, ch_w_addr, ch_w_data, ch_w_base;
 volatile uint32_t addr_temp;
 volatile uint32_t *dummy = (uint32_t *)0x12345678;
 const uint32_t *wr_addr = (uint32_t *)&mem[0x5638];
+static uint32_t *base_addr = (uint32_t *)&mem[0];
 
 void emuz80_dma_init()
 {
@@ -222,12 +241,16 @@ void emuz80_dma_init()
     channel_config_set_transfer_data_size(&cr_data, DMA_SIZE_8);
     channel_config_set_read_increment(&cr_data, false);
     channel_config_set_write_increment(&cr_data, false);
+    //channel_config_set_dreq(&cr_data, pio_get_dreq(pio0, 0, true));
     channel_config_set_chain_to(&cr_data, ch_r_base);
     dma_channel_configure(ch_r_data, &cr_data, 
         &pio0_hw->txf[0],
-        NULL, 
+        base_addr, 
         1, 
         false);
+    printf("base_addr: %08lX\n", base_addr);
+    printf("ch_r_read_addr: %08lX\n", dma_hw->ch[ch_r_data].al1_read_addr);
+    printf("&ch_r_read_addr: %08lX\n", &dma_hw->ch[ch_r_data].al1_read_addr);
 
     // Ch_R_Addr: PIO RX FIFO -> READ_ADDR Register in CH_R_data (16bit ring buffer)
     dma_channel_config cr_addr = dma_channel_get_default_config(ch_r_addr);
@@ -236,17 +259,19 @@ void emuz80_dma_init()
     channel_config_set_write_increment(&cr_addr, false);
     channel_config_set_dreq(&cr_addr, pio_get_dreq(pio0, 0, false));
     channel_config_set_chain_to(&cr_addr, ch_r_data);
-    volatile uint32_t *ch_r_read_addr_set_alias = hw_set_alias(&dma_hw->ch[ch_r_data].al1_read_addr);
+    //uint32_t *ch_r_read_addr_set_alias = hw_narrow_zero_alias((&dma_hw->ch[ch_r_data].read_addr));
+    //uint32_t *ch_r_read_addr_set_alias = hw_narrow_zero_alias(hw_set_alias(&dma_hw->ch[ch_r_data].read_addr));
+    uint32_t *ch_r_read_addr_set_alias = hw_set_alias(&dma_hw->ch[ch_r_data].read_addr);
+    //uint32_t *ch_r_read_addr_set_alias = &dma_hw->ch[ch_r_data].read_addr;
+    printf("ch_r_read_addr_set_alias: %08lX\n", ch_r_read_addr_set_alias);
     dma_channel_configure(ch_r_addr, &cr_addr, 
-        ch_r_read_addr_set_alias, 
+        ch_r_read_addr_set_alias, // //ch_r_read_addr_set_alias, 
         &pio0_hw->rxf[0], 
         1, 
         false);
     //printf("ch_r_data: %d, ch_r_addr: %d\n", ch_r_data, ch_r_addr);
-    //printf("dma_hw->ch[ch_r_data].read_addr: %08lX\n", dma_hw->ch[ch_r_data].al1_read_addr);
-
-    static const uint32_t *base_addr = (uint32_t *)&mem[0];
-
+    printf("dma_hw->ch[ch_r_data].read_addr: %08lX\n", dma_hw->ch[ch_r_data].al1_read_addr);
+#if 1
     // Ch_R_Base: &mem[0] -> ch_r_addr->read_addr
     dma_channel_config cr_base = dma_channel_get_default_config(ch_r_base);
     channel_config_set_transfer_data_size(&cr_base, DMA_SIZE_32);
@@ -258,46 +283,37 @@ void emuz80_dma_init()
         &base_addr, 
         1, 
         false);
+#endif
 #if 1
+    uint8_t *ch_w_write_addr_set_alias = hw_narrow_zero_alias(hw_set_alias(&dma_hw->ch[ch_w_data].al1_write_addr));
+    printf("ch_w_write_addr_set_alias: %08lX\n", ch_w_write_addr_set_alias);
     // Ch W_Data: PIO RX FIFO -> RAM
     dma_channel_config cw_data = dma_channel_get_default_config(ch_w_data);
     channel_config_set_transfer_data_size(&cw_data, DMA_SIZE_8);
     channel_config_set_read_increment(&cw_data, false);
     channel_config_set_write_increment(&cw_data, false);
     channel_config_set_dreq(&cw_data, pio_get_dreq(pio0, 2, false));
-    channel_config_set_chain_to(&cw_data, ch_w_base);
+    channel_config_set_chain_to(&cw_data, ch_w_addr);
     dma_channel_configure(ch_w_data, &cw_data,
-        NULL,
+        base_addr,
         &pio0->rxf[2],
         1,
         false);
     
     // Ch W_Addr: PIO RX FIFO -> WRITE_ADDR register in Ch W_Data (ring buffer)
     dma_channel_config cw_addr = dma_channel_get_default_config(ch_w_addr);
-    channel_config_set_transfer_data_size(&cw_addr, DMA_SIZE_32);
+    channel_config_set_transfer_data_size(&cw_addr, DMA_SIZE_16);
     channel_config_set_read_increment(&cw_addr, false);
     channel_config_set_write_increment(&cw_addr, false);
+    channel_config_set_dreq(&cw_addr, pio_get_dreq(pio0, 1, false));
     channel_config_set_chain_to(&cw_addr, ch_w_data);
-    volatile uint32_t *ch_w_write_addr_set_alias = hw_set_alias(&dma_hw->ch[ch_w_data].al1_write_addr);
     dma_channel_configure(ch_w_addr, &cw_addr,
-        hw_set_alias(&dma_hw->ch[ch_w_data].al1_write_addr),
+        ch_w_write_addr_set_alias,
         &pio0->rxf[1],
         1, 
         false);
     printf("hw_set_addr: %08X, write_addr: %08X\n", hw_set_alias(&dma_hw->ch[ch_w_data].al1_write_addr), &dma_hw->ch[ch_w_data].al1_write_addr);
     printf("pio0->rxf[1]: %08X\n", &pio0->rxf[1]);
-    // Ch_W_Base: &mem[0] -> ch_r_addr->read_addr
-    dma_channel_config cw_base = dma_channel_get_default_config(ch_w_base);
-    channel_config_set_transfer_data_size(&cw_base, DMA_SIZE_32);
-    channel_config_set_read_increment(&cw_base, false);
-    channel_config_set_write_increment(&cw_base, false);
-    channel_config_set_dreq(&cw_base, pio_get_dreq(pio0, 1, false));
-    channel_config_set_chain_to(&cw_base, ch_w_addr);
-    dma_channel_configure(ch_w_base, &cw_base, 
-        &dma_hw->ch[ch_w_data].al1_write_addr, 
-        &base_addr,
-        1, 
-        false);
 #endif
 }
 
@@ -378,7 +394,7 @@ __attribute__((noinline)) void __time_critical_func(emuz80_core1_entry)(void)
 #define USE_DMA
 #if defined(USE_DMA)
     dma_channel_start(ch_r_base);
-    dma_channel_start(ch_w_base);
+    dma_channel_start(ch_w_addr); //dma_channel_start(ch_w_base);
 #endif
     // start target CPU clock
     pio_sm_set_enabled(pio1, 2, true);  // clockgen
@@ -392,46 +408,50 @@ __attribute__((noinline)) void __time_critical_func(emuz80_core1_entry)(void)
 #define TEST_DMA
 #if defined(TEST_DMA)
     // write pio test
+    volatile uint8_t d2;
     xcount = 10;
     while (1) {
+#define TEST_MEMRD
 #if defined(TEST_MEMRD)
-        if (((gpio_get_all()) & (1<<RD_Pin)) == 0) {
-            //sleep_us(1);
+        while ((gpio_get_all() & ((1<<RD_Pin)|(1<<WR_Pin))) == ((1<<RD_Pin)|(1<<WR_Pin)))
+            ;
+        a32 = dma_hw->ch[ch_r_data].read_addr;
+        if ((gpio_get_all() & (1<<RD_Pin)) == 0) {
             port = gpio_get_all();
-            //if ((port & ADDR_MASK) > 0x100) {
-            //    if (xcount > 0) { printf("a%08lX d%08lX\n", (port), (port >> D0_Pin)); }
-            //}
-            if (xcount > 0) printf("a%08lX d%08lX\n", (port), (port >> D0_Pin));
+            d2 = *(uint8_t *)a32;
+            if (xcount > 0) { 
+                printf("R a%08lX %08lX %08lX %02X\n", port, a32, addr_temp, d2);
+                xcount--; 
+            }
             while ((gpio_get_all() & (1<<RD_Pin)) == 0)
                 ;
+            continue;
         }
 #endif
 #define TEST_MEMWR
 #if defined(TEST_MEMWR)
-        while ((gpio_get_all() & (1<<WR_Pin)) != 0)
-            ;
-        
-        volatile uint8_t d1 = mem[0x5638];
-        while ((gpio_get_all() & (1<<WR_Pin)) == 0)
-            ;
-        port = gpio_get_all();
-        a32 = dma_hw->ch[ch_w_data].al1_write_addr;
-        //sleep_us(1);
-        volatile uint8_t d2 = mem[0x5638];
-        if (xcount > 0) { 
-            printf("a%08lX %08lX %02X\n", port, a32, d2);
-            xcount--; 
-        }
-        if (xcount == 1) {
-            for (int i = 0; i < 0x10000; ++i) {
-                if (i >= 8 && mem[i] != 0) {
-                    printf("X %04X %02X\n", i, mem[i]);
+        if ((gpio_get_all() & (1<<WR_Pin)) == 0) {
+            port = gpio_get_all();
+            a32 = dma_hw->ch[ch_w_data].al1_write_addr;
+            //sleep_us(1);
+            if (xcount > 0) { 
+                printf("W a%08lX %08lX %02X\n", port, a32, mem[0x5638]);
+                xcount--; 
+            }
+            if (xcount == 1) {
+                for (int i = 0; i < 0x10000; ++i) {
+                    if (i >= 9 && mem[i] != 0) {
+                        //printf("X %04X %02X\n", i, mem[i]);
+                    }
                 }
             }
+            while ((gpio_get_all() & (1<<WR_Pin)) == 0)
+                ;
+            continue;
         }
+#endif //TEST_MEMWR
     }
-#endif
-#endif
+#endif //TEST_DMA
 #if 0
 loop:
     while (((port = gpio_get_all()) & ((1 << RD_Pin)|(1 << WR_Pin))) == ((1 << RD_Pin)|(1 << WR_Pin)))
