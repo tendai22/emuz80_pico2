@@ -175,7 +175,7 @@ __attribute__((noinline)) int __time_critical_func(main)(void)
     mem[4] = 0x18;  // JR
     mem[5] = 0xfd;  // -3
 #endif
-#if 1
+#if 0
     // inc (hl) loop
     a = 0;
     mem[a++] = 0x21;

@@ -22,6 +22,11 @@
 #include "z80_rp2350b.pio.h"
 
 //
+// configure switches
+//
+#define USE_DMA
+
+//
 // Narrow IO Register write
 //
 // By ORing bit14 of the write_addr register alias, 
@@ -109,11 +114,11 @@ void emuz80_pio_init() {
     //   JMP_PIN: RD_Pin(20)
     //   SET_BASE: 31 (debug pin)
     printf("---start---\n");
-	offset1 = pio_add_program(pio0, &ram_read_program);
-    printf("ram_read: %d\n", offset1);
+	offset1 = pio_add_program(pio0, &ram_read_addr_program);
+    printf("ram_read_addr: %d\n", offset1);
     pio_sm_set_consecutive_pindirs(pio0, 0, A0_Pin, 16, false);
     //pio_sm_set_consecutive_pindirs(pio0, 0, RD_Pin, 1, false);
-    c = ram_read_program_get_default_config(offset1);
+    c = ram_read_addr_program_get_default_config(offset1);
     sm_config_set_in_pins(&c, A0_Pin);
     sm_config_set_in_pin_count(&c, 16);
     sm_config_set_in_shift(&c, false, false, 32);    // 16bit autopush
@@ -181,6 +186,23 @@ void emuz80_pio_init() {
     sm_config_set_clkdiv(&c, clk_divider); // 12.0 ... 6.25MHz max
     pio_sm_init(pio1, 2, offset1, &c);
 
+    // PIO0:SM3 ... data_out
+    //   OUT/MOV: D0-Pin(24), OUT_COUNT: 8(D0-D7)
+    //   SET_BASE: WAIT
+	offset1 = pio_add_program(pio0, &data_out_program);
+    printf("data_out: %d\n", offset1);
+    //pio_sm_set_consecutive_pindirs(pio0, 0, A0_Pin, 16, false);
+    //pio_sm_set_consecutive_pindirs(pio0, 0, RD_Pin, 1, false);
+    c = data_out_program_get_default_config(offset1);
+    //sm_config_set_in_pins(&c, A0_Pin);
+    //sm_config_set_in_pin_count(&c, 16);
+    //sm_config_set_in_shift(&c, false, false, 32);    // 16bit autopush
+    sm_config_set_out_pins(&c, D0_Pin, 8);
+    sm_config_set_out_shift(&c, false, false, 32);    // 8bit autopull
+    //sm_config_set_jmp_pin(&c, RD_Pin);
+    sm_config_set_clkdiv(&c, 1);         // 1 ... full speed 
+    pio_sm_init(pio0, 3, offset1, &c);
+
 
     // PIO1: SM3 ... IO cycle WAIT handler
     //   SET: BASE: 19(WAIT_Pin)
@@ -229,6 +251,7 @@ static uint32_t *base_addr = (uint32_t *)&mem[0];
 
 void emuz80_dma_init()
 {
+#if defined(USE_DMA)
     ch_r_base = dma_claim_unused_channel(true);
     ch_r_addr = dma_claim_unused_channel(true);
     ch_r_data = dma_claim_unused_channel(true);
@@ -244,7 +267,7 @@ void emuz80_dma_init()
     //channel_config_set_dreq(&cr_data, pio_get_dreq(pio0, 0, true));
     channel_config_set_chain_to(&cr_data, ch_r_base);
     dma_channel_configure(ch_r_data, &cr_data, 
-        &pio0_hw->txf[0],
+        &pio0_hw->txf[3],//&pio0_hw->txf[0],
         base_addr, 
         1, 
         false);
@@ -315,7 +338,9 @@ void emuz80_dma_init()
     printf("hw_set_addr: %08X, write_addr: %08X\n", hw_set_alias(&dma_hw->ch[ch_w_data].al1_write_addr), &dma_hw->ch[ch_w_data].al1_write_addr);
     printf("pio0->rxf[1]: %08X\n", &pio0->rxf[1]);
 #endif
+#endif //USE_DMA
 }
+
 
 // コア1のエントリポイント
 // core1_entry()はPIOの状態マシンを実行し、ROMデータを送信する
@@ -335,7 +360,7 @@ __attribute__((noinline)) void __time_critical_func(emuz80_core1_entry)(void)
 
     multicore_fifo_push_blocking(FLAG_VALUE);
     uint32_t g = multicore_fifo_pop_blocking();
-
+#if defined (USE_DMA)
     // safe DMA abort
     // 1. エラッタ RP2350-E5 対策: 先にチャンネルの有効化を解除する
     dma_hw->ch[0].al1_ctrl &= ~DMA_CH0_CTRL_TRIG_EN_BITS;
@@ -364,7 +389,7 @@ __attribute__((noinline)) void __time_critical_func(emuz80_core1_entry)(void)
            dma_channel_is_busy(5)) {
             tight_loop_contents();
     }
-
+#endif //USE_DMA
     // Z80 Input pin initialize
     emuz80_gpio_init();
     emuz80_pio_init();
@@ -391,7 +416,7 @@ __attribute__((noinline)) void __time_critical_func(emuz80_core1_entry)(void)
     pio_sm_set_enabled(pio0, 0, true);  // ram_read
     pio_sm_set_enabled(pio0, 1, true);  // ram_write_addr
     pio_sm_set_enabled(pio0, 2, true);  // ram_write_data
-#define USE_DMA
+    pio_sm_set_enabled(pio0, 3, true);  // data_out
 #if defined(USE_DMA)
     dma_channel_start(ch_r_base);
     dma_channel_start(ch_w_addr); //dma_channel_start(ch_w_base);
@@ -405,6 +430,7 @@ __attribute__((noinline)) void __time_critical_func(emuz80_core1_entry)(void)
     sleep_us((int)period);  // clk_divider / 250MHz
     // start target CPU
     emuz80_unreset();
+#if defined(USE_DMA)
 #define TEST_DMA
 #if defined(TEST_DMA)
     // write pio test
@@ -452,6 +478,7 @@ __attribute__((noinline)) void __time_critical_func(emuz80_core1_entry)(void)
 #endif //TEST_MEMWR
     }
 #endif //TEST_DMA
+#endif //USE_DMA
 #if 0
 loop:
     while (((port = gpio_get_all()) & ((1 << RD_Pin)|(1 << WR_Pin))) == ((1 << RD_Pin)|(1 << WR_Pin)))
@@ -483,6 +510,23 @@ loop:
     goto loop;
 #endif
 
+#if 1 // PIO DEBUGGING, soft PIO drive code
+    while (1) {
+        while (((port = gpio_get_all()) & ((1 << RD_Pin)|(1 << WR_Pin))) == ((1 << RD_Pin)|(1 << WR_Pin)))
+            ;
+        // using CPU loop
+        if (xcount > 0) printf("X ");
+        a32 = pio_sm_get_blocking(pio0, 0);
+        data = mem[a32&ADDR_MASK];
+        pio_sm_put(pio0, 3, data);
+        if (xcount > 0) {
+            printf("%08lX: %02lX\n", a32, data);
+            xcount--;
+        }
+        while (((port = gpio_get_all()) & ((1 << RD_Pin)|(1 << WR_Pin))) != ((1 << RD_Pin)|(1 << WR_Pin)))
+            ;
+    }
+#endif
 loop:
     while (((port = gpio_get_all()) & (1 << IORQ_Pin)) != 0)
         ;
