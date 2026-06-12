@@ -17,14 +17,16 @@
 ;   IN: A0-A15(0), IN_COUNT: 16
 ;   OUT: D0-Pin(24), OUT_COUNT: 8(D0-D7)
 ;   MOV: D0-Pin(24), OUT_COUNT: 8
-;   JMP_PIN: RD_Pin(21)
+;   JMP_PIN: IORQ_Pin(21)
 ;   SET_BASE: 31 (debug pin)
 ;   GPIO: CS: 26, OE: 27;   : RD_Pin(16), count: 1
 .program ram_read_addr
 .wrap_target
 loop_1:
-    wait 1 gpio IORQ_Pin ; wait for IORQ==High && RD==Low
-    jmp pin loop_1
+    wait 0 gpio RD_Pin; wait for IORQ==High && RD==Low
+    jmp pin do_1
+    jmp loop_1
+do_1:
     in pins, 16         ; capture A0-A15
     push                ; 32 bit is specified in in-shift,
                         ; so explicit push is needed. 
@@ -39,12 +41,15 @@ loop_1:
 ; PIO0:SM1 ... ram_write_addr
 ;   IN: A0-A15(0), IN_COUNT: 16, autopush
 ;   MOV: D0-Pin(24), OUT_COUNT: 8
+;   JMP: IORQ_Pin
 ;
 .program ram_write_addr
 .wrap_target
 loop_2:
-    wait 1 gpio IORQ_Pin ; wait for IORQ==High && WR==Low
-    jmp pin loop_2
+    wait 0 gpio WR_Pin ; wait for IORQ==High && WR==Low
+    jmp pin do_2
+    jmp loop_2
+do_2:
     mov pindirs, null   ; D0-D7 as input
     in pins, 16
     push
@@ -57,8 +62,10 @@ loop_2:
 .program ram_write_data
 .wrap_target
 loop_3:
-    wait 1 gpio IORQ_Pin
-    jmp pin loop_3
+    wait 0 gpio WR_Pin
+    jmp pin do_3
+    jmp loop_3
+do_3:
     wait 1 gpio WR_Pin  ; wait for WR upper edge
     in pins, 8
     push

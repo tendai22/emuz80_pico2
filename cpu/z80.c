@@ -49,7 +49,7 @@ extern volatile int rx_rdy, tx_rdy, rx_data, tx_data, txbuf_full;
 #define sm_config_set_in_pin_count(c, num)
 #endif
 
-float clk_divider = 8;      // 31 ... about 4MHz
+float clk_divider = 25;      // 31 ... about 4MHz
                             // 30000 for debugging
                             // 9 ... 13.89MHz seems to OK
                             // 8 ... 15.62MHz no good.
@@ -118,13 +118,14 @@ void emuz80_pio_init() {
     printf("ram_read_addr: %d\n", offset1);
     pio_sm_set_consecutive_pindirs(pio0, 0, A0_Pin, 16, false);
     //pio_sm_set_consecutive_pindirs(pio0, 0, RD_Pin, 1, false);
+    //pio_sm_set_consecutive_pindirs(pio0, 0, IORQ_Pin, 1, false);
     c = ram_read_addr_program_get_default_config(offset1);
     sm_config_set_in_pins(&c, A0_Pin);
     sm_config_set_in_pin_count(&c, 16);
     sm_config_set_in_shift(&c, false, false, 32);    // 16bit autopush
     sm_config_set_out_pins(&c, D0_Pin, 8);
     sm_config_set_out_shift(&c, false, false, 32);    // 8bit autopull
-    sm_config_set_jmp_pin(&c, RD_Pin);
+    sm_config_set_jmp_pin(&c, IORQ_Pin);
     sm_config_set_clkdiv(&c, 1);         // 1 ... full speed 
     pio_sm_init(pio0, 0, offset1, &c);
 
@@ -136,6 +137,7 @@ void emuz80_pio_init() {
     printf("ram_write_addr: %d\n", offset1);
     pio_sm_set_consecutive_pindirs(pio0, 1, A0_Pin, 16, false);
     pio_sm_set_consecutive_pindirs(pio0, 1, WR_Pin, 1, false);
+    pio_sm_set_consecutive_pindirs(pio0, 1, IORQ_Pin, 1, false);
     c = ram_write_addr_program_get_default_config(offset1);
     sm_config_set_in_pins(&c, A0_Pin);
     sm_config_set_in_pin_count(&c, 16);
@@ -143,7 +145,7 @@ void emuz80_pio_init() {
     sm_config_set_out_pins(&c, D0_Pin, 8);
     sm_config_set_out_pin_count(&c, 8);
     sm_config_set_out_shift(&c, false, false, 8);    // 8bit no-autopush
-    sm_config_set_jmp_pin(&c, WR_Pin);
+    sm_config_set_jmp_pin(&c, IORQ_Pin);
     sm_config_set_clkdiv(&c, 1);         // 1 ... full speed 
     pio_sm_init(pio0, 1, offset1, &c);
 
@@ -153,11 +155,12 @@ void emuz80_pio_init() {
     printf("ram_write_data: %d\n", offset1);
     pio_sm_set_consecutive_pindirs(pio0, 2, D0_Pin, 8, false);  // data as input
     pio_sm_set_consecutive_pindirs(pio0, 2, WR_Pin, 1, false);
+    pio_sm_set_consecutive_pindirs(pio0, 2, IORQ_Pin, 1, false);
     c = ram_write_data_program_get_default_config(offset1);
     sm_config_set_in_pins(&c, D0_Pin);
     sm_config_set_in_pin_count(&c, 8);
     sm_config_set_in_shift(&c, false, false, 8);   // no-autopush
-    sm_config_set_jmp_pin(&c, WR_Pin);
+    sm_config_set_jmp_pin(&c, IORQ_Pin);
     sm_config_set_clkdiv(&c, 1);         // 1 ... full speed 
     pio_sm_init(pio0, 2, offset1, &c);
  
@@ -191,14 +194,14 @@ void emuz80_pio_init() {
     //   SET_BASE: WAIT
 	offset1 = pio_add_program(pio0, &data_out_program);
     printf("data_out: %d\n", offset1);
-    //pio_sm_set_consecutive_pindirs(pio0, 0, A0_Pin, 16, false);
-    //pio_sm_set_consecutive_pindirs(pio0, 0, RD_Pin, 1, false);
+    //pio_sm_set_consecutive_pindirs(pio0, 3, A0_Pin, 16, false);
+    pio_sm_set_consecutive_pindirs(pio0, 3, RD_Pin, 1, false);
     c = data_out_program_get_default_config(offset1);
     //sm_config_set_in_pins(&c, A0_Pin);
     //sm_config_set_in_pin_count(&c, 16);
     //sm_config_set_in_shift(&c, false, false, 32);    // 16bit autopush
     sm_config_set_out_pins(&c, D0_Pin, 8);
-    sm_config_set_out_shift(&c, false, false, 32);    // 8bit autopull
+    sm_config_set_out_shift(&c, true, false, 32);    // 8bit autopull
     //sm_config_set_jmp_pin(&c, RD_Pin);
     sm_config_set_clkdiv(&c, 1);         // 1 ... full speed 
     pio_sm_init(pio0, 3, offset1, &c);
@@ -355,7 +358,7 @@ __attribute__((noinline)) void __time_critical_func(emuz80_core1_entry)(void)
     uint16_t addr;
     uint8_t data;
     volatile register uint32_t a32, d32;
-    int xcount = 100;
+    int xcount = 10;
 
 
     multicore_fifo_push_blocking(FLAG_VALUE);
@@ -410,9 +413,21 @@ __attribute__((noinline)) void __time_critical_func(emuz80_core1_entry)(void)
     pio_sm_set_enabled(pio0, 2, false);  // ram_write_data
     pio_sm_clear_fifos(pio0, 2);
     pio_sm_restart(pio0, 2);
+    pio_sm_set_enabled(pio0, 3, false);  // ram_write_data
+    pio_sm_clear_fifos(pio0, 3);
+    pio_sm_restart(pio0, 3);
+
+    // start target CPU clock
+    pio_sm_set_enabled(pio1, 2, true);  // clockgen
+    // wait for some time, which seems to be needed
+    // CPU clock: (1000 * 2 / 250) (ns) * clk_divider
+    float period = ((1000 * 2 / 250) * clk_divider) * 10 / 1000;
+    period += 5;
+    printf("period: %.0f\n", period);
+    sleep_us((int)period);  // clk_divider / 250MHz
 
     // start pio state machines and dma's
-    //pio_sm_set_enabled(pio1, 3, true);  // iorq_wait
+    pio_sm_set_enabled(pio1, 3, true);  // iorq_wait
     pio_sm_set_enabled(pio0, 0, true);  // ram_read
     pio_sm_set_enabled(pio0, 1, true);  // ram_write_addr
     pio_sm_set_enabled(pio0, 2, true);  // ram_write_data
@@ -421,17 +436,10 @@ __attribute__((noinline)) void __time_critical_func(emuz80_core1_entry)(void)
     dma_channel_start(ch_r_base);
     dma_channel_start(ch_w_addr); //dma_channel_start(ch_w_base);
 #endif
-    // start target CPU clock
-    pio_sm_set_enabled(pio1, 2, true);  // clockgen
-    // wait for some time, which seems to be needed
-    // CPU clock: (1000 * 2 / 250) (ns) * clk_divider
-    float period = ((1000 * 2 / 250) * clk_divider) * 10 / 1000;
-    printf("period: %.0f\n", period);
-    sleep_us((int)period);  // clk_divider / 250MHz
     // start target CPU
     emuz80_unreset();
 #if defined(USE_DMA)
-#define TEST_DMA
+//#define TEST_DMA
 #if defined(TEST_DMA)
     // write pio test
     volatile uint8_t d2;
@@ -510,7 +518,7 @@ loop:
     goto loop;
 #endif
 
-#if 1 // PIO DEBUGGING, soft PIO drive code
+#if 0 // PIO DEBUGGING, soft PIO drive code
     while (1) {
         while (((port = gpio_get_all()) & ((1 << RD_Pin)|(1 << WR_Pin))) == ((1 << RD_Pin)|(1 << WR_Pin)))
             ;
@@ -528,6 +536,7 @@ loop:
     }
 #endif
 loop:
+    // IO R/W cycle
     while (((port = gpio_get_all()) & (1 << IORQ_Pin)) != 0)
         ;
     if ((port & (1 << IORQ_Pin)) == 0) {
@@ -537,14 +546,18 @@ loop:
             addr = port & 0xff;
             // UARTCR or DR
             if (addr == 1) {
+                status = (rx_rdy | (tx_rdy & ~txbuf_full));
+                //if (xcount > 0) {
+                //    printf("[%c:%c%c%c]\n", status+'0', rx_rdy+'0', tx_rdy+'0', txbuf_full+'0');
+                //    xcount--;
+                //}
                 // read status register
-                status = (rx_rdy | tx_rdy);
-                pio_sm_put(pio0, 2, status);
+                pio_sm_put(pio0, 3, status);
             } else if (addr == 0) {
                 // read data register
                 uint8_t data = rx_data;
                 rx_rdy = 0;
-                pio_sm_put(pio0, 2, data);
+                pio_sm_put(pio0, 3, data);
             }
         } else if ((port & (1 << WR_Pin)) == 0) {
             // IO Write cycle
@@ -553,7 +566,7 @@ loop:
             if (addr == 0) {
                 // UART DR
                 tx_data = data;
-                txbuf_full = 1;
+                txbuf_full = 2;
             }
         }
         pio_sm_put(pio1, 3, 0);       // notify IO process finished to the state machine

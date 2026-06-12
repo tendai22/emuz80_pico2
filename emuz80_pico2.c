@@ -221,7 +221,7 @@ __attribute__((noinline)) int __time_critical_func(main)(void)
     }
     printf("\n");
 #endif
-#if 0
+#if 1
     // UART R/W test
     for (int i = 0; i < sizeof uart_test; ++i)
         mem[i] = uart_test[i];
