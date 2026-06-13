@@ -25,7 +25,7 @@
 loop_1:
     wait 0 gpio RD_Pin; wait for IORQ==High && RD==Low
     jmp pin do_1
-    jmp loop_1
+    jmp skip_1
 do_1:
     in pins, 16         ; capture A0-A15
     push                ; 32 bit is specified in in-shift,
@@ -33,6 +33,7 @@ do_1:
     ;mov pindirs, ~null  ; D0-D7 as output
     ;pull
     ;out pins, 8         ; output DMA CH2 data to D0-D7
+skip_1:
     wait 1 gpio RD_Pin
     mov pindirs, null
 .wrap
@@ -48,11 +49,12 @@ do_1:
 loop_2:
     wait 0 gpio WR_Pin ; wait for IORQ==High && WR==Low
     jmp pin do_2
-    jmp loop_2
+    jmp skip_2
 do_2:
     mov pindirs, null   ; D0-D7 as input
     in pins, 16
     push
+skip_2:
     wait 1 gpio WR_Pin
 .wrap
 
@@ -62,13 +64,16 @@ do_2:
 .program ram_write_data
 .wrap_target
 loop_3:
-    wait 0 gpio WR_Pin
+    wait 0 gpio WR_Pin [4]
     jmp pin do_3
-    jmp loop_3
+    jmp skip_3
 do_3:
-    wait 1 gpio WR_Pin  ; wait for WR upper edge
     in pins, 8
     push
+    wait 1 gpio WR_Pin  ; wait for WR upper edge
+    jmp loop_3
+skip_3:
+    wait 1 gpio WR_Pin  ; wait for WR upper edge
 .wrap
 
 ;

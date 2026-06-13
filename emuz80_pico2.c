@@ -28,6 +28,7 @@
 
 #include "emuz80.h"
 
+
 void gpio_out_init(uint gpio, bool value) {
     gpio_set_dir(gpio, GPIO_OUT);
     gpio_put(gpio, value);
@@ -104,7 +105,7 @@ __attribute__((noinline)) void __time_critical_func(emuz80_core0_entry)(void)
 
 }
 
-//#define EMUBASIC_IO
+#define EMUBASIC_IO
 
 __attribute__((noinline)) int __time_critical_func(main)(void) 
 {
@@ -170,11 +171,28 @@ __attribute__((noinline)) int __time_critical_func(main)(void)
     // INC (HL), JR 0xfc
     mem[0] = 0x21;  // LD HL, 7F00H
     mem[1] = 0x00;
-    mem[2] = 0x7f;
+    mem[2] = 0x10;
     mem[3] = 0x34;  // INC (HL)
     mem[4] = 0x18;  // JR
     mem[5] = 0xfd;  // -3
 #endif
+#if 0
+    // long range INC (HL)
+    for (int i = 4; i < 0x2000; i++) {
+        mem[i] = 0;
+        if (i % 55 == 0)
+            mem[i] = 0x34;
+    }
+    mem[0] = 0x21;  // LD HL, 7F00H
+    mem[1] = 0x00;
+    mem[2] = 0x81;
+    mem[3] = 0x34;  // INC (HL)
+    mem[0x2000] = 0xC3;  // JR
+    mem[0x2001] = 0x03;  // -3
+    mem[0x2002] = 0x00;  // -3
+#endif
+
+
 #if 0
     // inc (hl) loop
     a = 0;
@@ -205,7 +223,7 @@ __attribute__((noinline)) int __time_critical_func(main)(void)
     mem[4] = 0xfb;  // -5 
 #endif
 # if 0
-    // UART TEST (IO port version)
+    // UART TX TEST (IO port version)
     uint8_t mem0[] = {
         0x31, 0x00, 0x80,
         0xDB, 0x01,
@@ -221,11 +239,47 @@ __attribute__((noinline)) int __time_critical_func(main)(void)
     }
     printf("\n");
 #endif
-#if 1
+#if 0
     // UART R/W test
     for (int i = 0; i < sizeof uart_test; ++i)
         mem[i] = uart_test[i];
 
+#endif
+#if 0
+    //mem[0x0058] = 0x34;
+    //mem[0x1c95] = 0x21;
+    for (int i = 0x8000; i < 0x8100; ++i)
+        mem[i] = ((255 - i) & 0xff);
+    mem[0] = 0x21;  // LD HL, 7F00H
+    mem[1] = 0x76;
+    mem[2] = 0x80;
+    mem[3] = 0x34;  // INC (HL)
+    mem[4] = 0; //0x23;  // INC HL
+    mem[5] = 0x18;  // JR -4
+    mem[6] = 0xfc;
+    mem[0x2000] = 0xC3;  // JR
+    mem[0x2001] = 0x03;  // -3
+    mem[0x2002] = 0x00;  // -3
+#endif
+#if 0
+    // LD (0x1c95),a でおかしくなるのでそこだけ切り出して
+    // 0番地においてみた→再現せず(期待通りに動く)
+    int base = 0x1c93;
+    for (int i = 0; i < 16; ++i) {
+        if (i % 8 == 0)
+            printf("%04X", i + base);
+        printf (" %02X", mem[i + base]);
+        if (i % 8 == 7)
+            printf("\n");
+    }
+    static uint8_t test1[] = {
+        0x3e, 0x00,         // LD A,00h
+        0x32, 0x92, 0x80,   // LD (8092H),A
+        0x3c,               // INC A
+        0xc3, 0x02, 0x00    // JP 0002H
+    };
+    for (int i = 0; i < sizeof test1; ++i)
+        mem[i] = test1[i];
 #endif
 #if 0
     uart_putc_raw(UART_ID, 'X');
@@ -236,7 +290,15 @@ __attribute__((noinline)) int __time_critical_func(main)(void)
     }
     uart_putc_raw(UART_ID, 'Y');
 #endif
-
+#if 0
+    mem[0x1c94] = 0x23;
+    mem[0x1c95] = 0x34;
+    mem[0x1c96] = 0x34;
+    mem[0x1c97] = 0x34;
+    mem[0x1c98] = 0x34;
+    mem[0x1c99] = 0xf5;
+    mem[0x1c9a] = 0x34;
+#endif
     //
     // core1 (bus read/write loop)
     //
