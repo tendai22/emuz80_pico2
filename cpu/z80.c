@@ -49,11 +49,15 @@ extern volatile int rx_rdy, tx_rdy, rx_data, tx_data, txbuf_full;
 #endif
 
                             // On 250MHz RP2350B clock.
-float clk_divider = 8;      // 31 ... about 4MHz
+float clk_divider = 10;     // 31 ... about 4MHz
                             // 30000 for debugging
                             // 9 ... 13.89MHz seems to OK
                             // 8 ... 15.62MHz seems to OK
                             // 7 ... 17.85MHz no good.
+                            // On 150MHz RP2350B clock
+                            // 10 ... 7.5MHz OK
+                            // 9  ... 8.333MHz OK
+                            // 8  ... 9.375MHz NG
 void emuz80_gpio_init()
 {
     // GPIO Out
@@ -99,8 +103,7 @@ void emuz80_pio_init() {
     // PIO1: pin assign
 	//pio_gpio_init(pio1, MREQ_Pin);
 	pio_gpio_init(pio1, IORQ_Pin);
-	//pio_gpio_init(pio1, WAIT_Pin);
-
+	pio_gpio_init(pio1, WAIT_Pin);
 
     uint offset1;
 
@@ -159,6 +162,18 @@ void emuz80_pio_init() {
     sm_config_set_jmp_pin(&c, IORQ_Pin);
     sm_config_set_clkdiv(&c, 1);         // 1 ... full speed 
     pio_sm_init(pio0, 2, offset1, &c);
+
+    // PIO0:SM3 ... data_out
+    //   OUT/MOV: D0-Pin(24), OUT_COUNT: 8(D0-D7)
+    //   SET_BASE: WAIT
+	offset1 = pio_add_program(pio0, &data_out_program);
+    printf("data_out: %d\n", offset1);
+    pio_sm_set_consecutive_pindirs(pio0, 3, RD_Pin, 1, false);
+    c = data_out_program_get_default_config(offset1);
+    sm_config_set_out_pins(&c, D0_Pin, 8);
+    sm_config_set_out_shift(&c, true, false, 32);    // 8bit autopull
+    sm_config_set_clkdiv(&c, 1);         // 1 ... full speed 
+    pio_sm_init(pio0, 3, offset1, &c);
  
     // PIO1:SM2 ... two/one phase clock generator(program clockgen)
 	// 	 SET: BASE: 40(CLK_Pin, inverted), 41(INT_Pin, inverted)
@@ -183,18 +198,6 @@ void emuz80_pio_init() {
     //   5.0 ... 14-16MHz (60-70ns) ... does not works
     sm_config_set_clkdiv(&c, clk_divider); // 12.0 ... 6.25MHz max
     pio_sm_init(pio1, 2, offset1, &c);
-
-    // PIO0:SM3 ... data_out
-    //   OUT/MOV: D0-Pin(24), OUT_COUNT: 8(D0-D7)
-    //   SET_BASE: WAIT
-	offset1 = pio_add_program(pio0, &data_out_program);
-    printf("data_out: %d\n", offset1);
-    pio_sm_set_consecutive_pindirs(pio0, 3, RD_Pin, 1, false);
-    c = data_out_program_get_default_config(offset1);
-    sm_config_set_out_pins(&c, D0_Pin, 8);
-    sm_config_set_out_shift(&c, true, false, 32);    // 8bit autopull
-    sm_config_set_clkdiv(&c, 1);         // 1 ... full speed 
-    pio_sm_init(pio0, 3, offset1, &c);
 
     // PIO1: SM3 ... IO cycle WAIT handler
     //   SET: BASE: 19(WAIT_Pin)
@@ -236,6 +239,23 @@ volatile uint32_t addr_temp;
 volatile uint32_t *dummy = (uint32_t *)0x12345678;
 const uint32_t *wr_addr = (uint32_t *)&mem[0x5638];
 static uint32_t *base_addr = (uint32_t *)&mem[0];
+static uint32_t *mask_pattern = (uint32_t *)0xffff;
+
+//
+// DMA configure support function
+//
+void dma_channel_init(int ch, int dma_size, int chain_to, int dreq, volatile void *dest, const volatile void *src)
+{
+    dma_channel_config c = dma_channel_get_default_config(ch);
+    channel_config_set_transfer_data_size(&c, dma_size);
+    channel_config_set_read_increment(&c, false);
+    channel_config_set_write_increment(&c, false);
+    if (chain_to >= 0)
+        channel_config_set_chain_to(&c, chain_to);
+    if (dreq >= 0)
+        channel_config_set_dreq(&c, dreq);
+    dma_channel_configure(ch, &c, dest, src, 1, false);
+}
 
 void emuz80_dma_init()
 {
@@ -248,82 +268,26 @@ void emuz80_dma_init()
     ch_w_data = dma_claim_unused_channel(true);
 
     // Ch_R_Data: RAM -> PIO TX FIFO
-    dma_channel_config cr_data = dma_channel_get_default_config(ch_r_data);
-    channel_config_set_transfer_data_size(&cr_data, DMA_SIZE_8);
-    channel_config_set_read_increment(&cr_data, false);
-    channel_config_set_write_increment(&cr_data, false);
-    channel_config_set_chain_to(&cr_data, ch_r_base);
-    dma_channel_configure(ch_r_data, &cr_data, 
-        &pio0_hw->txf[3],
-        base_addr, 
-        1, 
-        false);
-
+    volatile uint32_t *r_read_addr = &dma_hw->ch[ch_r_data].read_addr;
+    dma_channel_init(ch_r_data, DMA_SIZE_8, ch_r_base, -1, &pio0_hw->txf[3], base_addr);
     // Ch_R_Addr: PIO RX FIFO -> READ_ADDR Register in CH_R_data (16bit ring buffer)
-    dma_channel_config cr_addr = dma_channel_get_default_config(ch_r_addr);
-    channel_config_set_transfer_data_size(&cr_addr, DMA_SIZE_32);
-    channel_config_set_read_increment(&cr_addr, false);
-    channel_config_set_write_increment(&cr_addr, false);
-    channel_config_set_dreq(&cr_addr, pio_get_dreq(pio0, 0, false));
-    channel_config_set_chain_to(&cr_addr, ch_r_data);
-    volatile uint32_t *ch_r_read_addr_set_alias = hw_set_alias(&dma_hw->ch[ch_r_data].read_addr);
-    dma_channel_configure(ch_r_addr, &cr_addr, 
-        ch_r_read_addr_set_alias, // //ch_r_read_addr_set_alias, 
-        &pio0_hw->rxf[0], 
-        1, 
-        false);
+    dma_channel_init(ch_r_addr, DMA_SIZE_32, ch_r_data, pio_get_dreq(pio0, 0, false), 
+                        hw_set_alias(r_read_addr), &pio0_hw->rxf[0]);
     // Ch_R_Base: &mem[0] -> ch_r_addr->read_addr
-    dma_channel_config cr_base = dma_channel_get_default_config(ch_r_base);
-    channel_config_set_transfer_data_size(&cr_base, DMA_SIZE_32);
-    channel_config_set_read_increment(&cr_base, false);
-    channel_config_set_write_increment(&cr_base, false);
-    channel_config_set_chain_to(&cr_base, ch_r_addr);
-    dma_channel_configure(ch_r_base, &cr_base, 
-        &dma_hw->ch[ch_r_data].al1_read_addr, 
-        &base_addr, 
-        1, 
-        false);
-
+    dma_channel_init(ch_r_base, DMA_SIZE_32, ch_r_addr, -1, 
+                        r_read_addr, &base_addr);
     // hw_narrow_zero_aliasesは効いていないようだ。readと同じく base->addr->dataの
     // 3段構えとする。
     // Ch W_Data: PIO RX FIFO -> RAM
-    dma_channel_config cw_data = dma_channel_get_default_config(ch_w_data);
-    channel_config_set_transfer_data_size(&cw_data, DMA_SIZE_8);
-    channel_config_set_read_increment(&cw_data, false);
-    channel_config_set_write_increment(&cw_data, false);
-    channel_config_set_dreq(&cw_data, pio_get_dreq(pio0, 2, false));
-    channel_config_set_chain_to(&cw_data, ch_w_base);
-    dma_channel_configure(ch_w_data, &cw_data,
-        NULL,
-        &pio0->rxf[2],
-        1,
-        false);
-    
+    volatile uint32_t *w_write_addr = &dma_hw->ch[ch_w_data].al1_write_addr;
+    dma_channel_init(ch_w_data, DMA_SIZE_8, ch_w_base, pio_get_dreq(pio0, 2, false), 
+                        NULL, &pio0->rxf[2]);
     // Ch W_Addr: PIO RX FIFO -> WRITE_ADDR register in Ch W_Data (ring buffer)
-    dma_channel_config cw_addr = dma_channel_get_default_config(ch_w_addr);
-    channel_config_set_transfer_data_size(&cw_addr, DMA_SIZE_32);
-    channel_config_set_read_increment(&cw_addr, false);
-    channel_config_set_write_increment(&cw_addr, false);
-    channel_config_set_dreq(&cw_addr, pio_get_dreq(pio0, 1, false));
-    channel_config_set_chain_to(&cw_addr, ch_w_data);
-    volatile uint32_t *ch_w_write_addr_set_alias = hw_set_alias(&dma_hw->ch[ch_w_data].al1_write_addr);
-    dma_channel_configure(ch_w_addr, &cw_addr,
-        ch_w_write_addr_set_alias,
-        &pio0_hw->rxf[1],
-        1, 
-        false);
-
+    dma_channel_init(ch_w_addr, DMA_SIZE_32, ch_w_data, pio_get_dreq(pio0, 1, false), 
+                        hw_set_alias(w_write_addr), &pio0->rxf[1]);
     // Ch_W_Base: &mem[0] -> ch_w_addr->read_addr
-    dma_channel_config cw_base = dma_channel_get_default_config(ch_w_base);
-    channel_config_set_transfer_data_size(&cw_base, DMA_SIZE_32);
-    channel_config_set_read_increment(&cw_base, false);
-    channel_config_set_write_increment(&cw_base, false);
-    channel_config_set_chain_to(&cw_base, ch_w_addr);
-    dma_channel_configure(ch_w_base, &cw_base, 
-        &dma_hw->ch[ch_w_data].al1_write_addr, 
-        &base_addr, 
-        1, 
-        false);
+    dma_channel_init(ch_w_base, DMA_SIZE_32, ch_w_addr, -1, 
+                        w_write_addr, &base_addr);
 #endif //USE_DMA
 }
 
